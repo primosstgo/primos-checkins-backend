@@ -1,3 +1,4 @@
+from datetime import datetime
 from xmlrpc.client import DateTime
 from ninja import NinjaAPI
 from ninja import Schema
@@ -20,13 +21,13 @@ class UsuarioIn(Schema):
 class TurnoIn(Schema):
     id_turno: int
     rol: int
-    llegada: DateTime
+    llegada: datetime
 
 class TurnoOut(Schema):
     id_turno: int
     rol: int
-    llegada: DateTime
-    salida: DateTime
+    llegada: datetime
+    salida: datetime
 
 
 #======CRUD======#
