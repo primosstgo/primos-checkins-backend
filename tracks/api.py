@@ -63,7 +63,13 @@ def get_usuario(request, rol_id: int):
 @api.post("/turnos")
 def crear_turno(request, payload: TurnoIn):
     turno = models.Turno.objects.create(**payload.dict())
-    return {"turno": {turno}}
+    return {"turno": {turno.id_turno, turno.rol, turno.llegada}}
+
+#Encuentra un turno según su id_turno en la base de datos en la tabla tracks.turno.
+@api.get("/usuarios/{id_turno}", response=TurnoOut)
+def get_turno(request, id_t: int):
+    turno = get_object_or_404(models.Usuario, id_turno=id_t)
+    return turno
 
 #Actualiza un turno con la hora de salida según la id del turno entregado.
 @api.put("/turno/{id_turno}")
