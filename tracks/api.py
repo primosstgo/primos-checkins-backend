@@ -1,4 +1,5 @@
 from datetime import datetime
+from pyexpat import model
 from xmlrpc.client import DateTime
 from ninja import NinjaAPI
 from ninja import Schema
@@ -64,7 +65,7 @@ def get_usuario(request, rol_id: int):
 @api.post("/turnos")
 def crear_turno(request, payload: TurnoIn):
     turno = models.Turno.objects.create(**payload.dict())
-    return {"turno": {turno.id_turno, turno.rol, turno.llegada}}
+    return {"turno": turno.id_turno}
 
 #Encuentra un turno según su id_turno en la base de datos en la tabla tracks.turno.
 @api.get("/usuarios/{id_turno}", response=TurnoOut)
