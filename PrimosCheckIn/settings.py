@@ -25,7 +25,7 @@ SECRET_KEY = 'django-insecure-_+-$fxv-2ehbmg^jxq^s7^k8+w^3*b&ci5-boh^lb(v&7!ip#b
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
 
 
 # Application definition
@@ -38,14 +38,14 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
-    #'corsheaders',
+    'corsheaders',
     #my app
     'PrimosCheckIn',
     'tracks',
 ]
 
 MIDDLEWARE = [
-    #'corsheaders.middleware.CorsMiddleware'
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -68,7 +68,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
-            ],
+            ]
         },
     },
 ]
@@ -84,8 +84,8 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'primos_checkins', #BASE_DIR
-        'USER' : 'waracho',
-        'PASSWORD': 'nosequeponer123',
+        'USER' : 'postgres',
+        'PASSWORD': '0',
         'HOST' : 'localhost',
         'PORT' : '5432',
     }
@@ -116,12 +116,18 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'Chile'
+TIME_ZONE = 'America/Santiago'
 
 USE_I18N = True
 
-USE_TZ = True
+# Esto se pone falso para que el tiempo sea relativo a TIME_ZONE, de lo contrario será el tiempo en GTM
+USE_TZ = False
 
+CORS_ORIGIN_ALLOW_ALL=True
+#SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+#SESSION_COOKIE_SECURE = True
+#CSRF_COOKIE_SECURE = True
+#SECURE_SSL_REDIRECT = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.0/howto/static-files/

@@ -1,82 +1,239 @@
-from datetime import datetime
-from pyexpat import model
-from xmlrpc.client import DateTime
-from ninja import NinjaAPI
-from ninja import Schema
-from tracks import models
+from datetime import datetime, timedelta
+from os import times
+import sched
+from typing import List, Optional
+from ninja import NinjaAPI, Schema
 from django.shortcuts import get_list_or_404, get_object_or_404
+from django.db.utils import IntegrityError
+
+from tracks.models import *
+from tracks import utils
+from tracks import parameters
+
 api = NinjaAPI()
 
-#======SCHEMAS======#
+class Detail(Schema):
+    detail: str
 
-class PrimoIn(Schema):
+class ShiftOut(Schema):
+    id: int
+    
     rol: int
-    nombre: str
-    apellido: str
     nick: str
 
-class UsuarioIn(Schema):
+    checkin: datetime
+    checkout: Optional[datetime]
+
+class PrimoInfo(Schema):
     rol: int
-    correo: str
+    mail: str
 
-class TurnoIn(Schema):
-    id_turno: int
+    name: str
+    nick: str
+    
+    schedule: str
+    # Si tengo algún turno corriendo
+    running: Optional[ShiftOut]
+
+class UpcomingShift(Schema):
+    isactive: bool
+    shift: str
+    checkin: datetime
+    checkout: datetime
+
+class Now(Schema):
+    weekday: int
+    time: str
+    datetime: datetime
+
+    # Actual o siguiente turno (Si es que ahora mismo no hay un turno activo)
+    ushift: UpcomingShift
+    pair: List[PrimoInfo]
+
+class ShiftIn(Schema):
     rol: int
-    llegada: datetime
 
-class TurnoOut(Schema):
-    id_turno: int
-    rol: int
-    llegada: datetime
-    salida: datetime
+class ShiftUpdate(Schema):
+    id: int
 
+@api.get("/now", response=Now)
+def get_now_time(_):
+    now = utils.now()
+    
+    ushift = utils.upcomingShift()
+    pair = []
+    for primo in Primo.objects.all():
+        schedule = utils.parseSchedule(primo.schedule)
+        if ushift in schedule:
+            pair.append(primo)
+        
+    # Dejo toterancia al principio para que puedas empezar el turno antes,
+    # pero no al final porque podrías iniciar un turno cuando el bloque ya terminó
+    ushift["isactive"] = (ushift["checkin"]  - parameters.tolerance) < utils.now() < ushift["checkout"]
 
-#======CRUD======#
+    return {
+        "weekday": now.weekday(),
+        "time": f"{now.hour:02d}:{now.minute:02d}",
+        "datetime": now,
+        
+        "ushift": ushift,
+        "pair": pair
+    }
 
-#Agrega un primo a la base de datos en la tabla tracks.primos.
-@api.post("/primos")
-def crear_primo(request, payload: PrimoIn):
-    primo = models.Primo.objects.create(**payload.dict())
-    return {"rol": primo.rol}
+@api.get("/primos/{int:rol}", response=PrimoInfo)
+def get_primo(_, rol: int):
+    primo = get_object_or_404(Primo, rol=rol)
+    firstHour = utils.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    try:
+        rshift = Shift.objects.get(checkin__gt=firstHour, primo=rol, checkout__isnull=True)
+        running = {
+            "id": rshift.id,
 
-#Encuentra un primo según su rol en la base de datos en la tabla tracks.primo.
-@api.get("/primos/{rol}", response=PrimoIn)
-def get_primo(request, rol_id: int):
-    primo = get_object_or_404(models.Primo, rol=rol_id)
-    return primo
+            "rol": rshift.primo.rol,
+            "nick": rshift.primo.nick,
 
+            "checkin": rshift.checkin,
+            "checkout": rshift.checkout
+        }
+    except Shift.DoesNotExist:
+        running = None
 
+    ushift = utils.parseSchedule(primo.schedule)[0]
 
-#Agrega un usuario a la base de datos en la tabla tracks.usuario.
-@api.post("/usuarios")
-def crear_usuario(request, payload: UsuarioIn):
-    usuario = models.Usuario.objects.create(**payload.dict())
-    return {"usuario": usuario.rol}
+    return {
+        "rol": primo.rol,
+        "mail": primo.mail,
 
-#Encuentra un usuario según su rol en la base de datos en la tabla tracks.usuario.
-@api.get("/usuarios/{rol}", response=UsuarioIn)
-def get_usuario(request, rol_id: int):
-    usuario = get_object_or_404(models.Usuario, rol=rol_id)
-    return usuario
+        "name": primo.name,
+        "nick": primo.nick,
+        
+        "schedule": primo.schedule,
+        "running": running,
+    }
 
+@api.post("/primos", response={200: PrimoInfo, 400: Detail})
+def push_a_primo(_, payload: PrimoInfo):
+    try:
+        if not utils.verifyRegex(payload.schedule):
+            return 400, {"detail": "Invalid schedule"}
+        primo = Primo.objects.create(**payload.dict())
+    except IntegrityError as e:
+        return 400, {"detail": "Duplicated key"}
 
+    return 200, primo
 
-#Agrega un turno nuevo a la base de datos en la tabla tracks.turno.
-@api.post("/turnos")
-def crear_turno(request, payload: TurnoIn):
-    turno = models.Turno.objects.create(**payload.dict())
-    return {"turno": turno.id_turno}
+@api.get("/shifts", response=List[ShiftOut])
+def get_shifts(_):
+    return [{
+        "id": shift.id,
+        
+        "rol": shift.primo.rol,
+        "nick": shift.primo.nick,
+        
+        "checkin": shift.checkin,
+        "checkout": shift.checkout,
+    } for shift in Shift.objects.all()]
 
-#Encuentra un turno según su id_turno en la base de datos en la tabla tracks.turno.
-@api.get("/usuarios/{id_turno}", response=TurnoOut)
-def get_turno(request, id_t: int):
-    turno = get_object_or_404(models.Usuario, id_turno=id_t)
-    return turno
+@api.post("/shifts", response={200: ShiftOut, 403: Detail})
+def push_a_shift(_, payload: ShiftIn):
+    now = utils.now()
+    primo = get_object_or_404(Primo, rol=payload.rol)
+    shifts = utils.parseSchedule(primo.schedule)
+    
+    for shift in shifts:
+        if (shift["checkin"] - parameters.tolerance) < now < (shift["checkout"] + parameters.tolerance):
+            break
+    else:
+        return 403, {"detail": "You're not on your shift"}
+    
+    shift = Shift.objects.create(**{"primo": primo, "checkin": now})
+    return 200, {
+        "id": shift.id,
 
-#Actualiza un turno con la hora de salida según la id del turno entregado.
-@api.put("/turno/{id_turno}")
-def update_salida(request, id_t: int, payload: TurnoOut):
-    turno = get_object_or_404(models.Turno, id_turno=id_t)
-    turno.salida = payload.salida
-    turno.save()
-    return {"success": True}
+        "rol": payload.rol,
+        "nick": shift.primo.nick,
+        
+        "checkin": shift.checkin,
+    }
+
+@api.post("/DEBUGshifts")
+def push_a_shift_debug(_, payload: ShiftOut):
+    primo = get_object_or_404(Primo, rol=payload.rol)
+    shift = Shift.objects.create(**{
+        "primo": primo,
+        "checkin": payload.checkin,
+        "checkout": payload.checkout
+    })
+    return 200, {
+        "id": shift.id,
+        
+        "rol": payload.rol,
+        
+        "checkin": shift.checkin,
+    }
+
+@api.get("/shifts/week", response=List[List[ShiftOut]])
+def get_week_shifts(_):
+    now = utils.now()
+    
+    week = [[], [], [], [], []]
+    for shift in Shift.objects.filter(checkin__gt=utils.firstWeekday()).order_by('checkin'):
+        week[shift.checkin.weekday()].append({
+            "id": shift.id,
+            
+            "rol": shift.primo.rol,
+            "nick": shift.primo.nick,
+            
+            "checkin": shift.checkin,
+            "checkout": shift.checkout,
+        })
+
+    # Esta parte del código se encarga de fusionar turnos consecutivos
+    onemin = timedelta(minutes=1)
+    for day in week:
+        thisshift = 0
+        while thisshift < len(day):
+            nextshift = thisshift + 1
+            while nextshift < len(day):
+                if (day[thisshift]["checkout"] == None) or (day[nextshift]["checkin"] - day[thisshift]["checkout"]) > onemin:
+                    # Ya que los turnos están ordenados se que esta condición se va a cumplir para todos los siguientes turnos
+                    break
+                elif day[thisshift]["rol"] == day[nextshift]["rol"]:
+                    # Fusiono dos turnos si la diferencia entre que finalizó uno y empezó otro es de menos de 1 minuto
+                    day[thisshift]["checkout"] = day.pop(nextshift)["checkout"]    
+                nextshift += 1
+            thisshift += 1
+
+    return week
+
+@api.get("/shifts/{int:rol}", response=List[ShiftOut])
+def get_shifts_by_rol(_, rol: int):
+    shifts = get_list_or_404(Shift, primo=rol)
+    return [{
+        "id": shift.id,
+        
+        "rol": rol,
+        "nick": shift.primo.nick,
+        
+        "checkin": shift.checkin,
+        "checkout": shift.checkout,
+    } for shift in shifts]
+
+@api.put("/shifts", response={200: ShiftOut, 403: Detail})
+def update_a_shift(_, payload: ShiftUpdate):
+    now = utils.now()
+    shift = get_object_or_404(Shift, id=payload.id)
+    if shift.checkin.date() != now.date():
+        return 403, {"detail": "The check-in day is already over"}
+    
+    shift.checkout = now
+    shift.save()
+    return 200, {
+        "id": shift.id,
+        
+        "rol": shift.primo.rol,
+        "nick": shift.primo.nick,
+        
+        "checkin": shift.checkin,
+        "checkout": shift.checkout
+    }
