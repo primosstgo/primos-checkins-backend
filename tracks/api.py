@@ -80,17 +80,17 @@ def get_now_time(_):
         "pair": pair
     }
 
-@api.get("/primos/{int:rol}", response=PrimoInfo)
-def get_primo(_, rol: int):
-    primo = get_object_or_404(Primo, rol=rol)
+@api.get("/primos/{str:mail}", response=PrimoInfo)
+def get_primo(_, mail: str):
+    primo = get_object_or_404(Primo, mail=mail)
     firstHour = utils.now().replace(hour=0, minute=0, second=0, microsecond=0)
     try:
-        rshift = Shift.objects.get(checkin__gt=firstHour, primo=rol, checkout__isnull=True)
+        rshift = Shift.objects.get(checkin__gt=firstHour, primo=primo, checkout__isnull=True)
         running = {
             "id": rshift.id,
 
-            "rol": rshift.primo.rol,
-            "nick": rshift.primo.nick,
+            "rol": primo.rol,
+            "nick": primo.nick,
 
             "checkin": rshift.checkin,
             "checkout": rshift.checkout
