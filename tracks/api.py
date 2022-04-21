@@ -82,7 +82,7 @@ def get_now_time(_):
 
 @api.get("/primos/{str:mail}", response=PrimoInfo)
 def get_primo(_, mail: str):
-    primo = get_object_or_404(Primo, mail=mail)
+    primo = get_object_or_404(Primo, mail=mail.lower())
     firstHour = utils.now().replace(hour=0, minute=0, second=0, microsecond=0)
     try:
         rshift = Shift.objects.get(checkin__gt=firstHour, primo=primo, checkout__isnull=True)
