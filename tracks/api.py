@@ -1,7 +1,11 @@
 from datetime import datetime, timedelta
+from pickle import NONE
+from time import time
+from tkinter import W
+from tkinter.messagebox import NO
 from typing import List, Optional
 from ninja import NinjaAPI, Schema
-from django.shortcuts import get_list_or_404, get_object_or_404
+from django.shortcuts import get_object_or_404, get_list_or_404
 
 from tracks.models import *
 from tracks import utils
@@ -51,6 +55,30 @@ class Now(Schema):
     upcoming: UpcomingShift
     pair: List[NaturalPrimo] # Primos de turno
 
+class SheduleShift(Schema):
+    weekday: int
+    block: str
+    time: int
+
+# Estadísticas de puntualidad de un primo
+class Resume(Schema):
+    start: datetime
+    end: datetime
+
+    # Horario del primo, sin fecha específica
+    schedule: List[SheduleShift]
+    # Número de turnos que el primo debió haber cumplido
+    # correctamente durante el periodo de tiempo estudiado
+    ideal: int
+
+    inSchedule: List[RegisteredShift] # Turnos correctamente registrados
+    # Turnos efectuados pero incoherentes; puede deberse a:
+    # 1. No coincide con ningún turno del primo (Al momento de la llamada a la api)
+    # 2. Cerrado temprano
+    # 3. Cerrado tarde
+    # 4. Nunca cerrado
+    suspicious: List[RegisteredShift]
+
 class PushShift(Schema):
     mail: str
 
@@ -68,9 +96,7 @@ def get_now_time(_):
         if upcoming in schedule:
             pair.append(primo)
         
-    # Dejo toterancia al principio para que puedas empezar el turno antes,
-    # pero no al final porque podrías iniciar un turno cuando el bloque ya terminó
-    upcoming["isactive"] = (upcoming["checkin"]  - parameters.tolerance) < utils.now() < upcoming["checkout"]
+    upcoming["isactive"] = (upcoming["checkin"]  - parameters.beforeStartTolerance) < utils.now() < (upcoming["checkin"]  + parameters.afterStartTolerance)#upcoming["checkout"]
 
     return {
         "weekday": now.weekday(),
@@ -81,12 +107,19 @@ def get_now_time(_):
         "pair": pair
     }
 
+@api.get("/primos", response=List[NaturalPrimo])
+def get_primos(_):
+    return [{
+        "mail": primo.mail,
+        "nick": primo.nick
+    } for primo in get_list_or_404(Primo)]
+
 @api.get("/primos/{str:mail}", response=CurrentPrimo)
 def get_primo(_, mail: str):
     primo = get_object_or_404(Primo, mail=mail.lower())
     firstHour = utils.now().replace(hour=0, minute=0, second=0, microsecond=0)
     try:
-        rshift = Shift.objects.get(checkin__gt=firstHour, primo=primo, checkout__isnull=True)
+        rshift = Shift.objects.get(checkin__gte=firstHour, primo=primo, checkout__isnull=True)
         nshift = utils.aproximateToBlock(rshift.checkin)
         running = {
             "id": rshift.id,
@@ -113,22 +146,64 @@ def get_primo(_, mail: str):
         "next": nshift
     }
 
-# Retorna todos los turnos que han habido, de forma histórica.
-@api.get("/shifts", response=List[RegisteredShift])
-def get_shifts(_):
-    return [{
-        "id": shift.id,
-        
-        "primo": {
-            "mail": shift.primo.mail,
-            "nick": shift.primo.nick,
-        },
+# Esta función te retorna un resumen de todos los turnos de un primo en un intervalo de tiempo
+@api.get("/shifts", response=Resume)
+def get_shifts(_, mail: str, start: datetime, end: datetime = None):
+    if end == None:
+        end = utils.now()
+    start = start.replace(tzinfo=None)
+    end = end.replace(tzinfo=None)
+    
+    primo = get_object_or_404(Primo, mail=mail.lower())
 
-        "block": utils.aproximateToBlock(shift.checkin)["block"],
-        
-        "checkin": shift.checkin,
-        "checkout": shift.checkout,
-    } for shift in Shift.objects.all()]
+    schedule = utils.parseSchedule(primo.schedule, reference=start)
+    ideal = (weeks := (end - start).days//7)*len(schedule)
+    curr = start + timedelta(days=weeks*7)
+    for shift in schedule:
+        checkin = shift["checkin"]
+        curr += timedelta(days=(checkin.weekday() - curr.weekday())%7, hours=checkin.hour - curr.hour, minutes=checkin.minute - curr.minute)
+        if curr > end:
+            break
+        ideal += 1
+    
+    inSchedule, suspicious = [], []
+    for shift in Shift.objects.filter(checkin__gte=start, checkin__lte=end, primo=primo):
+        block = utils.aproximateToBlock(shift.checkin)
+        fshift = {
+            "id": shift.id,
+            
+            "primo": {
+                "mail": shift.primo.mail,
+                "nick": shift.primo.nick,
+            },
+
+            "block": block["block"],
+            
+            "checkin": shift.checkin,
+            "checkout": shift.checkout,
+        }
+
+        rightCheckin = (block["checkin"] - parameters.beforeStartTolerance) < fshift["checkin"] < (block["checkin"]  + parameters.afterStartTolerance)
+        rigthCheckout = (fshift["checkout"] != None) and (block["checkout"] < fshift["checkout"] < (block["checkout"] + parameters.afterEndTolerance))
+        if rightCheckin and rigthCheckout:
+            inSchedule.append(fshift)
+        else:
+            suspicious.append(fshift)
+    
+    return {
+        "start": start,
+        "end": end,
+
+        "schedule": list(map(lambda s: {
+            "weekday": s["checkin"].weekday(),
+            "block": s["block"],
+            "time": 60*s['checkin'].hour + s['checkin'].minute
+        }, schedule)),
+        "ideal": ideal,
+
+        "inSchedule": inSchedule,
+        "suspicious": suspicious
+    }
 
 @api.post("/shifts", response={200: RegisteredShift, 403: Detail})
 def push_a_shift(_, payload: PushShift):
@@ -136,8 +211,9 @@ def push_a_shift(_, payload: PushShift):
     primo = get_object_or_404(Primo, mail=payload.mail)
     shifts = utils.parseSchedule(primo.schedule)
     
+    # Aquí se verifica si el turno que estás intentando pushear corresponde a alguno de los turnos de tu horario
     for shift in shifts:
-        if (shift["checkin"] - parameters.tolerance) < now < (shift["checkout"] + parameters.tolerance):
+        if (shift["checkin"] - parameters.beforeStartTolerance) < now < (shift["checkin"] + parameters.afterStartTolerance): #< (shift["checkout"] + parameters.afterEndTolerance):
             break
     else:
         return 403, {"detail": "You're not on your shift"}
@@ -177,7 +253,7 @@ def get_week_shifts(_):
     now = utils.now()
     
     week = [[], [], [], [], []]
-    for shift in Shift.objects.filter(checkin__gt=utils.firstWeekday()).order_by('checkin'):
+    for shift in Shift.objects.filter(checkin__gte=utils.firstWeekday()).order_by('checkin'):
         week[shift.checkin.weekday()].append({
             "id": shift.id,
             
@@ -202,7 +278,7 @@ def get_week_shifts(_):
                 if (day[thisshift]["checkout"] == None) or (day[nextshift]["checkin"] - day[thisshift]["checkout"]) > onemin:
                     # Ya que los turnos están ordenados se que esta condición se va a cumplir para todos los siguientes turnos
                     break
-                elif day[thisshift]["primo"] == day[nextshift]["primo"]:
+                if day[thisshift]["primo"] == day[nextshift]["primo"]:
                     # Fusiono dos turnos si la diferencia entre que finalizó uno y empezó otro es de menos de 1 minuto
                     day[thisshift]["checkout"] = day.pop(nextshift)["checkout"]    
                 nextshift += 1
@@ -210,22 +286,22 @@ def get_week_shifts(_):
 
     return week
 
-@api.get("/shifts/{str:mail}", response=List[RegisteredShift])
-def get_shifts_by_mail(_, mail: str):
-    shifts = get_list_or_404(Shift, primo=mail)
-    return [{
-        "id": shift.id,
-        
-        "primo": {
-            "mail": shift.primo.mail,
-            "nick": shift.primo.nick,
-        },
-
-        "block": utils.aproximateToBlock(shift.checkin)["block"],
-        
-        "checkin": shift.checkin,
-        "checkout": shift.checkout,
-    } for shift in shifts]
+#@api.get("/shifts/{str:mail}", response=List[RegisteredShift])
+#def get_shifts_by_mail(_, mail: str):
+#    shifts = get_list_or_404(Shift, primo=mail)
+#    return [{
+#        "id": shift.id,
+#        
+#        "primo": {
+#            "mail": shift.primo.mail,
+#            "nick": shift.primo.nick,
+#        },
+#
+#        "block": utils.aproximateToBlock(shift.checkin)["block"],
+#        
+#        "checkin": shift.checkin,
+#        "checkout": shift.checkout,
+#    } for shift in shifts]
 
 @api.put("/shifts", response={200: RegisteredShift, 403: Detail})
 def update_a_shift(_, payload: UpdateShift):
