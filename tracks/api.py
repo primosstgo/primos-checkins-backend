@@ -1,8 +1,5 @@
 from datetime import datetime, timedelta
-from pickle import NONE
 from time import time
-from tkinter import W
-from tkinter.messagebox import NO
 from typing import List, Optional
 from ninja import NinjaAPI, Schema
 from django.shortcuts import get_object_or_404, get_list_or_404
@@ -58,7 +55,7 @@ class Now(Schema):
 class SheduleShift(Schema):
     weekday: int
     block: str
-    time: int
+    time: int # Tiempo transcurrido desde que comenzó el día en minutos
 
 # Estadísticas de puntualidad de un primo
 class Resume(Schema):
@@ -96,7 +93,7 @@ def get_now_time(_):
         if upcoming in schedule:
             pair.append(primo)
         
-    upcoming["isactive"] = (upcoming["checkin"]  - parameters.beforeStartTolerance) < utils.now() < (upcoming["checkin"]  + parameters.afterStartTolerance)#upcoming["checkout"]
+    upcoming["isactive"] = (upcoming["checkin"]  - parameters.beforeStartTolerance) < utils.now() < (upcoming["checkin"]  + parameters.afterStartTolerance)
 
     return {
         "weekday": now.weekday(),
@@ -117,9 +114,8 @@ def get_primos(_):
 @api.get("/primos/{str:mail}", response=CurrentPrimo)
 def get_primo(_, mail: str):
     primo = get_object_or_404(Primo, mail=mail.lower())
-    firstHour = utils.now().replace(hour=0, minute=0, second=0, microsecond=0)
     try:
-        rshift = Shift.objects.get(checkin__gte=firstHour, primo=primo, checkout__isnull=True)
+        rshift = Shift.objects.get(checkin__gte=utils.now().date(), primo=primo, checkout__isnull=True)
         nshift = utils.aproximateToBlock(rshift.checkin)
         running = {
             "id": rshift.id,
@@ -147,6 +143,7 @@ def get_primo(_, mail: str):
     }
 
 # Esta función te retorna un resumen de todos los turnos de un primo en un intervalo de tiempo
+# Es importante que <start> y <end> no vengan con información de zona horaria
 @api.get("/shifts", response=Resume)
 def get_shifts(_, mail: str, start: datetime, end: datetime = None):
     if end == None:
@@ -167,7 +164,7 @@ def get_shifts(_, mail: str, start: datetime, end: datetime = None):
         ideal += 1
     
     inSchedule, suspicious = [], []
-    for shift in Shift.objects.filter(checkin__gte=start, checkin__lte=end, primo=primo):
+    for shift in Shift.objects.filter(checkin__gte=start, checkin__lte=end, primo=primo).order_by('checkin'):
         block = utils.aproximateToBlock(shift.checkin)
         fshift = {
             "id": shift.id,
@@ -197,7 +194,7 @@ def get_shifts(_, mail: str, start: datetime, end: datetime = None):
         "schedule": list(map(lambda s: {
             "weekday": s["checkin"].weekday(),
             "block": s["block"],
-            "time": 60*s['checkin'].hour + s['checkin'].minute
+            "time": 60*s["checkin"].hour + s["checkin"].minute
         }, schedule)),
         "ideal": ideal,
 
@@ -232,22 +229,6 @@ def push_a_shift(_, payload: PushShift):
         "checkin": shift.checkin,
     }
 
-#@api.post("/DEBUGshifts")
-#def push_a_shift_debug(_, payload: RegisteredShift):
-#    primo = get_object_or_404(Primo, mail=payload.mail)
-#    shift = Shift.objects.create(**{
-#        "primo": primo,
-#        "checkin": payload.checkin,
-#        "checkout": payload.checkout
-#    })
-#    return 200, {
-#        "id": shift.id,
-#        
-#        "rol": payload.rol,
-#        
-#        "checkin": shift.checkin,
-#    }
-
 @api.get("/shifts/week", response=List[List[RegisteredShift]])
 def get_week_shifts(_):
     now = utils.now()
@@ -277,6 +258,8 @@ def get_week_shifts(_):
             while nextshift < len(day):
                 if (day[thisshift]["checkout"] == None) or (day[nextshift]["checkin"] - day[thisshift]["checkout"]) > onemin:
                     # Ya que los turnos están ordenados se que esta condición se va a cumplir para todos los siguientes turnos
+                    # NOTA: Releí este comentario ^^^ y lo entiendo para la primera condición, pero no para la segunda,
+                    # valdría la pena revisarlo.
                     break
                 if day[thisshift]["primo"] == day[nextshift]["primo"]:
                     # Fusiono dos turnos si la diferencia entre que finalizó uno y empezó otro es de menos de 1 minuto
@@ -286,32 +269,19 @@ def get_week_shifts(_):
 
     return week
 
-#@api.get("/shifts/{str:mail}", response=List[RegisteredShift])
-#def get_shifts_by_mail(_, mail: str):
-#    shifts = get_list_or_404(Shift, primo=mail)
-#    return [{
-#        "id": shift.id,
-#        
-#        "primo": {
-#            "mail": shift.primo.mail,
-#            "nick": shift.primo.nick,
-#        },
-#
-#        "block": utils.aproximateToBlock(shift.checkin)["block"],
-#        
-#        "checkin": shift.checkin,
-#        "checkout": shift.checkout,
-#    } for shift in shifts]
-
 @api.put("/shifts", response={200: RegisteredShift, 403: Detail})
 def update_a_shift(_, payload: UpdateShift):
     now = utils.now()
     shift = get_object_or_404(Shift, id=payload.id)
+
     if shift.checkin.date() != now.date():
         return 403, {"detail": "The check-in day is already over"}
+    elif shift.checkout != None:
+        return 403, {"detail": "Shift already closed"}
     
     shift.checkout = now
     shift.save()
+    
     return 200, {
         "id": shift.id,
         
@@ -325,3 +295,6 @@ def update_a_shift(_, payload: UpdateShift):
         "checkin": shift.checkin,
         "checkout": shift.checkout
     }
+
+#@api.post("/shifts/pardon", response={200: RegisteredShift, 403: Detail})
+#def pardon_a_shift(_, payload: )
