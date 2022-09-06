@@ -1,4 +1,5 @@
-docker-compose build
-docker-compose run --rm app django-admin startproject core .
-docker-compose up
-docker exec -it django_container /bin/bash
+sudo docker-compose build
+// Esta weá a veces da un error pero todo bn
+sudo docker-compose run --rm app django-admin startproject core .
+sudo docker-compose up
+sudo docker exec -it django_container /bin/bash
