@@ -7,10 +7,14 @@ from tracks import parameters
 def now():
     return datetime.now()#.replace(day=9, hour=9, minute=26, second=0, microsecond=0)
 
-def firstWeekday(reference: datetime = now()):
+def firstWeekday(reference: datetime = None):
+    if reference == None:
+        reference = now()
     return reference.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days = reference.weekday())
 
-def firstMonthDay(month: int, year: int = now().year):
+def firstMonthDay(month: int, year: int = None):
+    if year == None:
+        year = now().year
     return date(year, month, 1)
 
 def getRegex():
@@ -22,7 +26,9 @@ def verifyRegex(schedule: str) -> bool:
 
 # Retorna el horario del primo, ordenado desde el turno actual (desde el punto de
 # referencia <reference>) o el más cercano, hasta el más lejano.
-def parseSchedule(schedule: str, reference = now()):
+def parseSchedule(schedule: str, reference = None):
+    if reference == None:
+        reference = now()
     nextWeek = timedelta(days=7)
     shifts = []
     
