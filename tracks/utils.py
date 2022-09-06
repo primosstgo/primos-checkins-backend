@@ -7,10 +7,10 @@ from tracks import parameters
 def now():
     return datetime.now()#.replace(day=9, hour=9, minute=26, second=0, microsecond=0)
 
-def firstWeekday(reference: datetime = None):
+def firstWeekday(reference: datetime = None) -> date:
     if reference == None:
         reference = now()
-    return reference.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days = reference.weekday())
+    return reference.date() - timedelta(days = reference.weekday())
 
 def firstMonthDay(month: int, year: int = None):
     if year == None:
@@ -18,7 +18,7 @@ def firstMonthDay(month: int, year: int = None):
     return date(year, month, 1)
 
 def getRegex():
-    lastShift = len(parameters.shifts) - 1
+    lastShift = len(parameters.Block) - 1
     return f'([{parameters.days}](?:[0-{lastShift}],)*[0-{lastShift}])'
 
 def verifyRegex(schedule: str) -> bool:
@@ -34,15 +34,15 @@ def parseSchedule(schedule: str, reference = None):
     
     for daily in findall(getRegex(), schedule):
         for i in daily[1:].split(','):
-            shift = parameters.shifts[int(i)]
-            checkout = firstWeekday(reference).replace(hour=shift[2][0], minute=shift[2][1]) + timedelta(parameters.days.index(daily[0]))
+            shift = parameters.Block[int(i)]
+            checkout = datetime.combine(firstWeekday(reference), shift.end) + timedelta(days=parameters.days.index(daily[0]))
             # Si el turno de esta semana ya terminó, entonces lo tiro para la
             # próxima semana
             if checkout < reference:
                 checkout += nextWeek
-            checkin = checkout.replace(hour=shift[1][0], minute=shift[1][1])
+            checkin = datetime.combine(checkout.date(), shift.start)
             shifts.append({
-                "block": shift[0],
+                "block": shift.block,
                 "checkin": checkin,
                 "checkout": checkout
             })
@@ -64,15 +64,15 @@ def parseSchedule(schedule: str, reference = None):
 #    sólo si estamos dentro de los límites de la tolerancia; si falta mucho para
 #    que comience el bloque o es demasiado tarde, lanzará un error.
 def aproximateToBlock(date: datetime, strictmode = True):
-    firstHour = date.replace(hour=0, minute=0, second=0, microsecond=0)
+    firstHour = date.date()
     if (weekday := firstHour.weekday()) > 4:
         if strictmode:
             raise Exception(f'<date> ({date}) is not a weekday, so is not close enough to any block')
         firstHour += timedelta(days=7 - weekday)
     
-    for shift in parameters.shifts:
-        checkin = firstHour.replace(hour=shift[1][0], minute=shift[1][1])
-        checkout = firstHour.replace(hour=shift[2][0], minute=shift[2][1])
+    for shift in parameters.Block:
+        checkin = datetime.combine(firstHour, shift.start)
+        checkout = datetime.combine(firstHour, shift.end)
 
         if strictmode:
             # Aproxima al siguiente bloque más cercano sólo si estamos dentro del
@@ -84,7 +84,7 @@ def aproximateToBlock(date: datetime, strictmode = True):
 
         if (checkin <= date <= checkout) or nextblockCondition:
             return {
-                "block": shift[0],
+                "block": shift.block,
                 "checkin": checkin,
                 "checkout": checkout
             }
@@ -92,9 +92,8 @@ def aproximateToBlock(date: datetime, strictmode = True):
         raise Exception(f'<date> ({date}) is not close enough to any block')
     
     nextWeek = timedelta(days=7)
-    shift = parameters.shifts[0]
     return {
-        "block": shift[0],
+        "block": parameters.Block[0].block,
         "checkin": checkin + nextWeek,
         "checkout": checkout  + nextWeek
     }
