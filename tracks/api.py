@@ -1,8 +1,11 @@
-from datetime import datetime, timedelta
-from time import time
+from time import sleep
+from django.shortcuts import get_object_or_404, get_list_or_404
+from django.db.utils import IntegrityError
+from django.forms.models import model_to_dict
+
+from datetime import datetime, time, timedelta, date
 from typing import List, Optional
 from ninja import NinjaAPI, Schema
-from django.shortcuts import get_object_or_404, get_list_or_404
 
 from tracks.models import *
 from tracks import utils
@@ -12,6 +15,17 @@ api = NinjaAPI()
 
 class Detail(Schema):
     detail: str
+
+# Representación abstracta de un turno, no tiene información
+# de la fecha del turno
+class PrimitiveShift(Schema):
+    weekday: int
+    block: str
+    time: int # Tiempo transcurrido desde que comenzó el día en minutos
+
+class _PrimitiveShift(Schema):
+    block: int
+    date: date
 
 # Esto es la estructura base de un turno, independiente de si
 # alguien lo ha hecho o no, y es una relación directa a los bloques.
@@ -52,18 +66,11 @@ class Now(Schema):
     upcoming: UpcomingShift
     pair: List[NaturalPrimo] # Primos de turno
 
-class SheduleShift(Schema):
-    weekday: int
-    block: str
-    time: int # Tiempo transcurrido desde que comenzó el día en minutos
-
 # Estadísticas de puntualidad de un primo
 class Resume(Schema):
     start: datetime
     end: datetime
 
-    # Horario del primo, sin fecha específica
-    schedule: List[SheduleShift]
     # Número de turnos que el primo debió haber cumplido
     # correctamente durante el periodo de tiempo estudiado
     ideal: int
@@ -76,31 +83,42 @@ class Resume(Schema):
     # 4. Nunca cerrado
     suspicious: List[RegisteredShift]
 
+    datapoints: List[int]
+    labels: List[str]
+
 class PushShift(Schema):
     mail: str
 
 class UpdateShift(Schema):
     id: int
 
+@api.get("/wait")
+def get_wait(_, time: int):
+    now = utils.now()
+    sleep(time)
+    return {"time": now}
+
 @api.get("/now", response=Now)
 def get_now_time(_):
     now = utils.now()
-    
-    upcoming = utils.upcomingShift()
+    upcoming = utils.aproximateToBlock(now, False)
     pair = []
     for primo in Primo.objects.all():
         schedule = utils.parseSchedule(primo.schedule)
         if upcoming in schedule:
             pair.append(primo)
-        
-    upcoming["isactive"] = (upcoming["checkin"]  - parameters.beforeStartTolerance) < utils.now() < (upcoming["checkin"]  + parameters.afterStartTolerance)
 
     return {
         "weekday": now.weekday(),
-        "time": f"{now.hour:02d}:{now.minute:02d}",
+        "time": now.time().isoformat('minutes'),
         "datetime": now,
         
-        "upcoming": upcoming,
+        "upcoming": {
+            "block": upcoming.block.name,
+            "checkin": upcoming.checkin(),
+            "checkout": upcoming.checkout(),
+            "isactive": (upcoming.checkin()  - parameters.beforeStartTolerance) < utils.now() < (upcoming.checkin()  + parameters.afterStartTolerance)
+        },
         "pair": pair
     }
 
@@ -115,7 +133,7 @@ def get_primos(_):
 def get_primo(_, mail: str):
     primo = get_object_or_404(Primo, mail=mail.lower())
     try:
-        rshift = Shift.objects.get(checkin__gte=utils.now().date(), primo=primo, checkout__isnull=True)
+        rshift = StampedShift.objects.get(checkin__gte=utils.now().date(), primo=primo, checkout__isnull=True)
         nshift = utils.aproximateToBlock(rshift.checkin)
         running = {
             "id": rshift.id,
@@ -125,12 +143,12 @@ def get_primo(_, mail: str):
                 "nick": primo.nick,
             },
 
-            "block": nshift["block"],
+            "block": nshift.name,
 
             "checkin": rshift.checkin,
             "checkout": rshift.checkout
         }
-    except Shift.DoesNotExist:
+    except StampedShift.DoesNotExist:
         nshift = utils.parseSchedule(primo.schedule)[0]
         running = None
 
@@ -139,67 +157,77 @@ def get_primo(_, mail: str):
         "nick": primo.nick,
         
         "running": running,
-        "next": nshift
+        "next": {
+            "block": nshift.block.name,
+            "checkin": nshift.checkin(),
+            "checkout": nshift.checkout()
+        }
     }
 
-# Esta función te retorna un resumen de todos los turnos de un primo en un intervalo de tiempo
-# Es importante que <start> y <end> no vengan con información de zona horaria
-@api.get("/shifts", response=Resume)
-def get_shifts(_, mail: str, start: datetime, end: datetime = None):
-    if end == None:
-        end = utils.now()
-    start = start.replace(tzinfo=None)
-    end = end.replace(tzinfo=None)
-    
+@api.get("/shifts")
+def get_shifts(_, mail: str, start: date, end: date = None):
+    if end is None:
+        end = utils.now().date()
     primo = get_object_or_404(Primo, mail=mail.lower())
 
-    schedule = utils.parseSchedule(primo.schedule, reference=start)
-    ideal = (weeks := (end - start).days//7)*len(schedule)
-    curr = start + timedelta(days=weeks*7)
-    for shift in schedule:
-        checkin = shift["checkin"]
-        curr += timedelta(days=(checkin.weekday() - curr.weekday())%7, hours=checkin.hour - curr.hour, minutes=checkin.minute - curr.minute)
-        if curr > end:
-            break
-        ideal += 1
-    
+    schedule = utils.parseSchedule(primo.schedule, reference=datetime.combine(start, time()))
     inSchedule, suspicious = [], []
-    for shift in Shift.objects.filter(checkin__gte=start, checkin__lte=end, primo=primo).order_by('checkin'):
-        block = utils.aproximateToBlock(shift.checkin)
-        fshift = {
-            "id": shift.id,
-            
-            "primo": {
-                "mail": shift.primo.mail,
-                "nick": shift.primo.nick,
-            },
-
-            "block": block["block"],
-            
-            "checkin": shift.checkin,
-            "checkout": shift.checkout,
+    for stampedShift in StampedShift.objects.filter(checkin__gte=start, checkin__lte=end, primo=primo):
+        shift = utils.aproximateToBlock(stampedShift.checkin)
+        fshift = model_to_dict(stampedShift)
+        fshift["primo"] = {
+            "mail": stampedShift.primo.mail,
+            "nick": stampedShift.primo.nick,
         }
+        fshift["block"] = shift.block.name
 
-        rightCheckin = (block["checkin"] - parameters.beforeStartTolerance) < fshift["checkin"] < (block["checkin"]  + parameters.afterStartTolerance)
-        rigthCheckout = (fshift["checkout"] != None) and (block["checkout"] < fshift["checkout"] < (block["checkout"] + parameters.afterEndTolerance))
+        rightCheckin = (shift.checkin() - parameters.beforeStartTolerance) < fshift["checkin"] < (shift.checkin()  + parameters.afterStartTolerance)
+        rigthCheckout = (fshift["checkout"] is not None) and (shift.checkout() < fshift["checkout"] < (shift.checkout() + parameters.afterEndTolerance))
         if rightCheckin and rigthCheckout:
             inSchedule.append(fshift)
         else:
             suspicious.append(fshift)
     
+    pardonedShifts = [utils.Shift(shift.date, parameters.Block[shift.block]) for shift in PardonedShift.objects.all()]
+    # Obtengo el horario relativo, donde cada valor es cuántos días de la semana deben avanzar
+    # desde el día anterior para llegar a ese día (de forma cíclica). Notar que está desfasado
+    # y el primer día se encuentra en el último lugar.
+    daysUntilNextShift = [(schedule[i].date.weekday() - schedule[(i - 1)%len(schedule)].date.weekday())%7 for i in range(len(schedule))]
+    curr = start + timedelta(days=(schedule[0].date.weekday() - start.weekday())%7)
+    datapoints, labels = [], []
+    i, j, k = 0, 0, 0
+    while curr <= end:
+        shift = utils.Shift(curr, schedule[i%len(schedule)].block)
+        while k < len(pardonedShifts) and pardonedShifts[k] < shift:
+            k += 1
+
+        if k >= len(pardonedShifts) or shift != pardonedShifts[k]:
+            labels.append(f"{parameters.days['mid'][shift.date.weekday()]} {shift.block.name}")
+            if (
+                    j < len(inSchedule)
+                and shift.date == inSchedule[j]["checkin"].date()
+                and shift.block.name == inSchedule[j]["block"]
+            ):
+                checkinTime = inSchedule[j]["checkin"].time()
+                shiftStartTime = shift.block.start
+                datapoints.append(60*(shiftStartTime.hour - checkinTime.hour) + shiftStartTime.minute - checkinTime.minute)
+                j += 1
+            else:
+                datapoints.append(None)
+        
+        curr += timedelta(days=daysUntilNextShift[(i := i + 1)%len(schedule)])
+    
     return {
         "start": start,
         "end": end,
 
-        "schedule": list(map(lambda s: {
-            "weekday": s["checkin"].weekday(),
-            "block": s["block"],
-            "time": 60*s["checkin"].hour + s["checkin"].minute
-        }, schedule)),
-        "ideal": ideal,
+        "ideal": len(datapoints),
 
         "inSchedule": inSchedule,
-        "suspicious": suspicious
+        "suspicious": suspicious,
+
+        "datapoints": datapoints,
+        "labels": labels,
     }
 
 @api.post("/shifts", response={200: RegisteredShift, 403: Detail})
@@ -215,7 +243,7 @@ def push_a_shift(_, payload: PushShift):
     else:
         return 403, {"detail": "You're not on your shift"}
     
-    shift = Shift.objects.create(**{"primo": primo, "checkin": now})
+    shift = StampedShift.objects.create(**{"primo": primo, "checkin": now})
     return 200, {
         "id": shift.id,
 
@@ -224,7 +252,7 @@ def push_a_shift(_, payload: PushShift):
             "nick": primo.nick,
         },
 
-        "block": utils.aproximateToBlock(shift.checkin)["block"],
+        "block": utils.aproximateToBlock(shift.checkin).name,
         
         "checkin": shift.checkin,
     }
@@ -234,7 +262,7 @@ def get_week_shifts(_):
     now = utils.now()
     
     week = [[], [], [], [], []]
-    for shift in Shift.objects.filter(checkin__gte=utils.firstWeekday()).order_by('checkin'):
+    for shift in StampedShift.objects.filter(checkin__gte=utils.firstWeekday()):
         week[shift.checkin.weekday()].append({
             "id": shift.id,
             
@@ -243,7 +271,7 @@ def get_week_shifts(_):
                 "nick": shift.primo.nick,
             },
 
-            "block": utils.aproximateToBlock(shift.checkin)["block"],
+            "block": utils.aproximateToBlock(shift.checkin).name,
             
             "checkin": shift.checkin,
             "checkout": shift.checkout,
@@ -256,7 +284,7 @@ def get_week_shifts(_):
         while thisshift < len(day):
             nextshift = thisshift + 1
             while nextshift < len(day):
-                if (day[thisshift]["checkout"] == None) or (day[nextshift]["checkin"] - day[thisshift]["checkout"]) > onemin:
+                if (day[thisshift]["checkout"] is None) or (day[nextshift]["checkin"] - day[thisshift]["checkout"]) > onemin:
                     # Ya que los turnos están ordenados se que esta condición se va a cumplir para todos los siguientes turnos
                     # NOTA: Releí este comentario ^^^ y lo entiendo para la primera condición, pero no para la segunda,
                     # valdría la pena revisarlo.
@@ -272,11 +300,11 @@ def get_week_shifts(_):
 @api.put("/shifts", response={200: RegisteredShift, 403: Detail})
 def update_a_shift(_, payload: UpdateShift):
     now = utils.now()
-    shift = get_object_or_404(Shift, id=payload.id)
+    shift = get_object_or_404(StampedShift, id=payload.id)
 
     if shift.checkin.date() != now.date():
         return 403, {"detail": "The check-in day is already over"}
-    elif shift.checkout != None:
+    elif shift.checkout is not None:
         return 403, {"detail": "Shift already closed"}
     
     shift.checkout = now
@@ -290,11 +318,24 @@ def update_a_shift(_, payload: UpdateShift):
             "nick": shift.primo.nick,
         },
         
-        "block": utils.aproximateToBlock(shift.checkin)["block"],
+        "block": utils.aproximateToBlock(shift.checkin).name,
 
         "checkin": shift.checkin,
         "checkout": shift.checkout
     }
 
-#@api.post("/shifts/pardon", response={200: RegisteredShift, 403: Detail})
-#def pardon_a_shift(_, payload: )
+@api.post("/shifts/pardon", response={200: NaturalShift, 403: Detail})
+def pardon_a_shift(_, payload: _PrimitiveShift):
+    if 0 <= payload.block < len(parameters.Block):
+        try:
+            PardonedShift.objects.create(**payload.dict())
+        except IntegrityError:
+            return 403, {"detail": "Shift already pardoned"}
+
+        block = parameters.Block[payload.block]
+        return 200, {
+            "block": block.name, 
+            "checkin": datetime.combine(payload.date, block.start),
+            "checkout": datetime.combine(payload.date, block.end)
+        }
+    return 403, {"detail": f"Block ({payload.block}) out of the range (0..{len(parameters.Block) - 1})"}

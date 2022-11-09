@@ -1,5 +1,8 @@
 from datetime import date, datetime, timedelta
 from re import findall, fullmatch
+from typing import List, NamedTuple
+from weakref import ref
+
 from tracks import parameters
 
 # Esta función es importante para el debug, ya que nos
@@ -8,46 +11,53 @@ def now():
     return datetime.now()#.replace(day=9, hour=9, minute=26, second=0, microsecond=0)
 
 def firstWeekday(reference: datetime = None) -> date:
-    if reference == None:
+    if reference is None:
         reference = now()
     return reference.date() - timedelta(days = reference.weekday())
 
 def firstMonthDay(month: int, year: int = None):
-    if year == None:
+    if year is None:
         year = now().year
     return date(year, month, 1)
 
 def getRegex():
     lastShift = len(parameters.Block) - 1
-    return f'([{parameters.days}](?:[0-{lastShift}],)*[0-{lastShift}])'
+    return f"([{parameters.days['short']}](?:[0-{lastShift}],)*[0-{lastShift}])"
 
 def verifyRegex(schedule: str) -> bool:
-    return fullmatch(f'{getRegex()}+', schedule) != None
+    return fullmatch(f'{getRegex()}+', schedule) is not None
 
+class Shift(NamedTuple):
+    date: date
+    block: parameters.Block
+
+    def __repr__(self) -> str:
+        return f'{self.date.isoformat()} {self.block.name}'
+
+    def checkin(self) -> datetime:
+        return datetime.combine(self.date, self.block.start)
+
+    def checkout(self) -> datetime:
+        return datetime.combine(self.date, self.block.end)
 # Retorna el horario del primo, ordenado desde el turno actual (desde el punto de
 # referencia <reference>) o el más cercano, hasta el más lejano.
-def parseSchedule(schedule: str, reference = None):
-    if reference == None:
+# NOTA: Debería retornar un objeto Block y un date
+def parseSchedule(schedule: str, reference: datetime = None) -> List[Shift]:
+    if reference is None:
         reference = now()
-    nextWeek = timedelta(days=7)
     shifts = []
     
     for daily in findall(getRegex(), schedule):
         for i in daily[1:].split(','):
-            shift = parameters.Block[int(i)]
-            checkout = datetime.combine(firstWeekday(reference), shift.end) + timedelta(days=parameters.days.index(daily[0]))
+            block = parameters.Block[int(i)]
+            checkout = datetime.combine(firstWeekday(reference), block.end) + timedelta(days=parameters.days['short'].index(daily[0]))
             # Si el turno de esta semana ya terminó, entonces lo tiro para la
             # próxima semana
             if checkout < reference:
-                checkout += nextWeek
-            checkin = datetime.combine(checkout.date(), shift.start)
-            shifts.append({
-                "block": shift.block,
-                "checkin": checkin,
-                "checkout": checkout
-            })
+                checkout += timedelta(days=7)
+            shifts.append(Shift(checkout.date(), block))
     
-    shifts.sort(key=lambda s: s["checkin"])
+    shifts.sort(key=lambda s: datetime.combine(s.date, s.block.start))
     return shifts
 
 # Esta función, dado <date: datetime> (Fecha y hora), retornará el bloque al que
@@ -63,16 +73,16 @@ def parseSchedule(schedule: str, reference = None):
 #   True: Se aproxima al bloque más cercano dentro del día de la semana indicado
 #    sólo si estamos dentro de los límites de la tolerancia; si falta mucho para
 #    que comience el bloque o es demasiado tarde, lanzará un error.
-def aproximateToBlock(date: datetime, strictmode = True):
+def aproximateToBlock(date: datetime, strictmode = True) -> Shift:
     firstHour = date.date()
     if (weekday := firstHour.weekday()) > 4:
         if strictmode:
             raise Exception(f'<date> ({date}) is not a weekday, so is not close enough to any block')
         firstHour += timedelta(days=7 - weekday)
     
-    for shift in parameters.Block:
-        checkin = datetime.combine(firstHour, shift.start)
-        checkout = datetime.combine(firstHour, shift.end)
+    for block in parameters.Block:
+        checkin = datetime.combine(firstHour, block.start)
+        checkout = datetime.combine(firstHour, block.end)
 
         if strictmode:
             # Aproxima al siguiente bloque más cercano sólo si estamos dentro del
@@ -83,20 +93,19 @@ def aproximateToBlock(date: datetime, strictmode = True):
             nextblockCondition = date < checkin
 
         if (checkin <= date <= checkout) or nextblockCondition:
+            return Shift(firstHour, block)
             return {
-                "block": shift.block,
+                "block": block.name,
                 "checkin": checkin,
                 "checkout": checkout
             }
     if strictmode:
         raise Exception(f'<date> ({date}) is not close enough to any block')
     
+    return Shift(firstHour + timedelta(days=7), parameters.Block[0])
     nextWeek = timedelta(days=7)
     return {
-        "block": parameters.Block[0].block,
+        "block": parameters.Block[0].name,
         "checkin": checkin + nextWeek,
         "checkout": checkout  + nextWeek
     }
-
-def upcomingShift():
-    return aproximateToBlock(now(), False)

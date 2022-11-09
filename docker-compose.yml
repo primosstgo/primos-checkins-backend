@@ -12,9 +12,9 @@ services:
       sh -c "python manage.py migrate &&
              python manage.py runserver 0.0.0.0:8001"
     environment:
-      - POSTGRES_NAME=postgres
+      - POSTGRES_NAME=primos_checkins
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_PASSWORD=0
     depends_on:
       - db 
   db:
@@ -23,8 +23,8 @@ services:
     volumes:
       - ./data/db:/var/lib/postgresql/data
     environment:
-      - POSTGRES_DB=postgres
+      - POSTGRES_DB=localhost
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_PASSWORD=0
     ports:
       - "5433:5432"
