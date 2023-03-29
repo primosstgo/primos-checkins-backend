@@ -127,7 +127,7 @@ def get_primos(_):
     return [{
         "mail": primo.mail,
         "nick": primo.nick
-    } for primo in get_list_or_404(Primo)]
+    } for primo in Primo.objects.all()]
 
 @api.get("/primos/{str:mail}", response=CurrentPrimo)
 def get_primo(_, mail: str):
@@ -166,6 +166,7 @@ def get_primo(_, mail: str):
 
 @api.get("/shifts")
 def get_shifts(_, mail: str, start: date, end: date = None):
+    print(0)
     if end is None:
         end = utils.now().date()
     primo = get_object_or_404(Primo, mail=mail.lower())
@@ -216,7 +217,7 @@ def get_shifts(_, mail: str, start: date, end: date = None):
                 datapoints.append(None)
         
         curr += timedelta(days=daysUntilNextShift[(i := i + 1)%len(schedule)])
-    
+
     return {
         "start": start,
         "end": end,
