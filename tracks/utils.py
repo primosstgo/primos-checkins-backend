@@ -1,7 +1,6 @@
 from datetime import date, datetime, timedelta
 from re import findall, fullmatch
 from typing import List, NamedTuple
-from weakref import ref
 
 from tracks import parameters
 
@@ -34,11 +33,14 @@ class Shift(NamedTuple):
     def __repr__(self) -> str:
         return f'{self.date.isoformat()} {self.block.name}'
 
+    @property
     def checkin(self) -> datetime:
         return datetime.combine(self.date, self.block.start)
 
+    @property
     def checkout(self) -> datetime:
         return datetime.combine(self.date, self.block.end)
+
 # Retorna el horario del primo, ordenado desde el turno actual (desde el punto de
 # referencia <reference>) o el más cercano, hasta el más lejano.
 # NOTA: Debería retornar un objeto Block y un date

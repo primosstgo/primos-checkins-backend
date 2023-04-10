@@ -115,9 +115,9 @@ def get_now_time(_):
         
         "upcoming": {
             "block": upcoming.block.name,
-            "checkin": upcoming.checkin(),
-            "checkout": upcoming.checkout(),
-            "isactive": (upcoming.checkin()  - parameters.beforeStartTolerance) < utils.now() < (upcoming.checkin()  + parameters.afterStartTolerance)
+            "checkin": upcoming.checkin,
+            "checkout": upcoming.checkout,
+            "isactive": (upcoming.checkin  - parameters.beforeStartTolerance) < utils.now() < (upcoming.checkin  + parameters.afterStartTolerance)
         },
         "pair": pair
     }
@@ -143,7 +143,7 @@ def get_primo(_, mail: str):
                 "nick": primo.nick,
             },
 
-            "block": nshift.name,
+            "block": nshift.block.name,
 
             "checkin": rshift.checkin,
             "checkout": rshift.checkout
@@ -159,8 +159,8 @@ def get_primo(_, mail: str):
         "running": running,
         "next": {
             "block": nshift.block.name,
-            "checkin": nshift.checkin(),
-            "checkout": nshift.checkout()
+            "checkin": nshift.checkin,
+            "checkout": nshift.checkout,
         }
     }
 
@@ -182,8 +182,8 @@ def get_shifts(_, mail: str, start: date, end: date = None):
         }
         fshift["block"] = shift.block.name
 
-        rightCheckin = (shift.checkin() - parameters.beforeStartTolerance) < fshift["checkin"] < (shift.checkin()  + parameters.afterStartTolerance)
-        rigthCheckout = (fshift["checkout"] is not None) and (shift.checkout() < fshift["checkout"] < (shift.checkout() + parameters.afterEndTolerance))
+        rightCheckin = (shift.checkin - parameters.beforeStartTolerance) < fshift["checkin"] < (shift.checkin  + parameters.afterStartTolerance)
+        rigthCheckout = (fshift["checkout"] is not None) and (shift.checkout < fshift["checkout"] < (shift.checkout + parameters.afterEndTolerance))
         if rightCheckin and rigthCheckout:
             inSchedule.append(fshift)
         else:
@@ -239,7 +239,7 @@ def push_a_shift(_, payload: PushShift):
     
     # Aquí se verifica si el turno que estás intentando pushear corresponde a alguno de los turnos de tu horario
     for shift in shifts:
-        if (shift["checkin"] - parameters.beforeStartTolerance) < now < (shift["checkin"] + parameters.afterStartTolerance): #< (shift["checkout"] + parameters.afterEndTolerance):
+        if (shift.checkin - parameters.beforeStartTolerance) < now < (shift.checkin + parameters.afterStartTolerance): #< (shift["checkout"] + parameters.afterEndTolerance):
             break
     else:
         return 403, {"detail": "You're not on your shift"}
@@ -253,7 +253,7 @@ def push_a_shift(_, payload: PushShift):
             "nick": primo.nick,
         },
 
-        "block": utils.aproximateToBlock(shift.checkin).name,
+        "block": utils.aproximateToBlock(shift.checkin).block.name,
         
         "checkin": shift.checkin,
     }
@@ -272,7 +272,7 @@ def get_week_shifts(_):
                 "nick": shift.primo.nick,
             },
 
-            "block": utils.aproximateToBlock(shift.checkin).name,
+            "block": utils.aproximateToBlock(shift.checkin).block.name,
             
             "checkin": shift.checkin,
             "checkout": shift.checkout,
