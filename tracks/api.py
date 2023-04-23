@@ -319,7 +319,7 @@ def update_a_shift(_, payload: UpdateShift):
             "nick": shift.primo.nick,
         },
         
-        "block": utils.aproximateToBlock(shift.checkin).name,
+        "block": utils.aproximateToBlock(shift.checkin).block.name,
 
         "checkin": shift.checkin,
         "checkout": shift.checkout
