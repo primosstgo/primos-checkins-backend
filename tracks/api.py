@@ -1,4 +1,3 @@
-from time import sleep
 from django.shortcuts import get_object_or_404, get_list_or_404
 from django.db.utils import IntegrityError
 from django.forms.models import model_to_dict
@@ -92,16 +91,10 @@ class PushShift(Schema):
 class UpdateShift(Schema):
     id: int
 
-@api.get("/wait")
-def get_wait(_, time: int):
-    now = utils.now()
-    sleep(time)
-    return {"time": now}
-
 @api.get("/now", response=Now)
 def get_now_time(_):
     now = utils.now()
-    upcoming = utils.aproximateToBlock(now, False)
+    upcoming = utils.aproximateToShift(now, False)
     pair = []
     for primo in Primo.objects.all():
         schedule = utils.parseSchedule(primo.schedule)
@@ -134,7 +127,7 @@ def get_primo(_, mail: str):
     primo = get_object_or_404(Primo, mail=mail.lower())
     try:
         rshift = StampedShift.objects.get(checkin__gte=utils.now().date(), primo=primo, checkout__isnull=True)
-        nshift = utils.aproximateToBlock(rshift.checkin)
+        nshift = utils.aproximateToShift(rshift.checkin)
         running = {
             "id": rshift.id,
             
@@ -166,7 +159,7 @@ def get_primo(_, mail: str):
 
 @api.get("/shifts")
 def get_shifts(_, mail: str, start: date, end: date = None):
-    print(0)
+    print('START GET /shifts')
     if end is None:
         end = utils.now().date()
     primo = get_object_or_404(Primo, mail=mail.lower())
@@ -174,7 +167,7 @@ def get_shifts(_, mail: str, start: date, end: date = None):
     schedule = utils.parseSchedule(primo.schedule, reference=datetime.combine(start, time()))
     inSchedule, suspicious = [], []
     for stampedShift in StampedShift.objects.filter(checkin__gte=start, checkin__lte=end, primo=primo):
-        shift = utils.aproximateToBlock(stampedShift.checkin)
+        shift = utils.aproximateToShift(stampedShift.checkin)
         fshift = model_to_dict(stampedShift)
         fshift["primo"] = {
             "mail": stampedShift.primo.mail,
@@ -218,6 +211,7 @@ def get_shifts(_, mail: str, start: date, end: date = None):
         
         curr += timedelta(days=daysUntilNextShift[(i := i + 1)%len(schedule)])
 
+    print('END GET /shifts')
     return {
         "start": start,
         "end": end,
@@ -253,7 +247,7 @@ def push_a_shift(_, payload: PushShift):
             "nick": primo.nick,
         },
 
-        "block": utils.aproximateToBlock(shift.checkin).block.name,
+        "block": utils.aproximateToShift(shift.checkin).block.name,
         
         "checkin": shift.checkin,
     }
@@ -272,7 +266,7 @@ def get_week_shifts(_):
                 "nick": shift.primo.nick,
             },
 
-            "block": utils.aproximateToBlock(shift.checkin).block.name,
+            "block": utils.aproximateToShift(shift.checkin).block.name,
             
             "checkin": shift.checkin,
             "checkout": shift.checkout,
@@ -319,7 +313,7 @@ def update_a_shift(_, payload: UpdateShift):
             "nick": shift.primo.nick,
         },
         
-        "block": utils.aproximateToBlock(shift.checkin).block.name,
+        "block": utils.aproximateToShift(shift.checkin).block.name,
 
         "checkin": shift.checkin,
         "checkout": shift.checkout

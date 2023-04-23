@@ -43,7 +43,8 @@ class Shift(NamedTuple):
 
 # Retorna el horario del primo, ordenado desde el turno actual (desde el punto de
 # referencia <reference>) o el más cercano, hasta el más lejano.
-# NOTA: Debería retornar un objeto Block y un date
+# NOTA1: Debería retornar un objeto Block y un date
+# NOTA2: Acabo de leer la NOTA1 y no tengo idea a qué me refería cuando la escribí
 def parseSchedule(schedule: str, reference: datetime = None) -> List[Shift]:
     if reference is None:
         reference = now()
@@ -75,11 +76,11 @@ def parseSchedule(schedule: str, reference: datetime = None) -> List[Shift]:
 #   True: Se aproxima al bloque más cercano dentro del día de la semana indicado
 #    sólo si estamos dentro de los límites de la tolerancia; si falta mucho para
 #    que comience el bloque o es demasiado tarde, lanzará un error.
-def aproximateToBlock(date: datetime, strictmode = True) -> Shift:
-    firstHour = date.date()
+def aproximateToShift(instant: datetime, strictmode = True) -> Shift:
+    firstHour = instant.date()
     if (weekday := firstHour.weekday()) > 4:
         if strictmode:
-            raise Exception(f'<date> ({date}) is not a weekday, so is not close enough to any block')
+            raise Exception(f'<instant> ({instant}) is not a weekday, so is not close enough to any block')
         firstHour += timedelta(days=7 - weekday)
     
     for block in parameters.Block:
@@ -89,25 +90,14 @@ def aproximateToBlock(date: datetime, strictmode = True) -> Shift:
         if strictmode:
             # Aproxima al siguiente bloque más cercano sólo si estamos dentro del
             # tiempo de tolerancia
-            nextblockCondition = checkin - parameters.beforeStartTolerance < date < checkin # <=
+            nextblockCondition = checkin - parameters.beforeStartTolerance < instant < checkin # <=
         else:
             # Aproxima directamente al bloque más cercano
-            nextblockCondition = date < checkin
+            nextblockCondition = instant < checkin
 
-        if (checkin <= date <= checkout) or nextblockCondition:
+        if (checkin <= instant <= checkout) or nextblockCondition:
             return Shift(firstHour, block)
-            return {
-                "block": block.name,
-                "checkin": checkin,
-                "checkout": checkout
-            }
     if strictmode:
-        raise Exception(f'<date> ({date}) is not close enough to any block')
+        raise Exception(f'<instant> ({instant}) is not close enough to any block')
     
     return Shift(firstHour + timedelta(days=7), parameters.Block[0])
-    nextWeek = timedelta(days=7)
-    return {
-        "block": parameters.Block[0].name,
-        "checkin": checkin + nextWeek,
-        "checkout": checkout  + nextWeek
-    }
