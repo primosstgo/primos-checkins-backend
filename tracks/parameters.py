@@ -1,18 +1,35 @@
-from datetime import timedelta
+from datetime import time, timedelta
 from warnings import warn
 
 days = 'lmxjv'
 
-shifts = [
-    ( "1-2" , ( 8, 15), ( 9, 25)),
-    ( "3-4" , ( 9, 35), (10, 45)),
-    ( "5-6" , (10, 55), (12,  5)),
-    ( "7-8" , (12, 15), (13, 25)),
-    ( "9-10", (14, 30), (15, 40)),
-    ("11-12", (15, 50), (17,  0)),
-    ("13-14", (17, 10), (18, 20)),
-    ("15-16", (18, 30), (19, 40))
-]
+class BlockMeta(type):    
+    _blocks = []
+
+    def __len__(self):
+        return len(self._blocks)
+
+    def __iter__(self):
+        return iter(self._blocks)
+
+    def __getitem__(self, key):
+        return self._blocks[key]
+
+class Block(metaclass=BlockMeta):
+    def __init__(self, block: str, start: time, end: time) -> None:
+        self.block = block
+        self.start = start
+        self.end = end
+        Block._blocks.append(self)
+
+Block( "1-2",  time( 8, 15), time( 9, 25))
+Block( "3-4",  time( 9, 35), time(10, 45))
+Block( "5-6",  time(10, 55), time(12,  5))
+Block( "7-8",  time(12, 15), time(13, 25))
+Block( "9-10", time(14, 30), time(15, 40))
+Block("11-12", time(15, 50), time(17,  0))
+Block("13-14", time(17, 10), time(18, 20))
+Block("15-16", time(18, 30), time(19, 40))
 
 # TOLERANCIAS
 # beforeStartTolerance: Cuanto tiempo antes de que comienze el turno se puede
@@ -35,27 +52,27 @@ afterEndTolerance = beforeStartTolerance
 # Esta función se asegura de que los parámetros tengan sentido
 def checks():
     badBlocks = []
-    for i in range(len(shifts)):
-        if not (shifts[i][1] < shifts[i][2]):
-            badBlocks.append(Exception(f'El bloque {shifts[i][0]} ({shifts[i][1][0]}:{shifts[i][1][1]} - {shifts[i][2][0]}:{shifts[i][2][1]}) termina antes de comenzar'))
-    for i in range(len(shifts) - 1):
-        if not (shifts[i][2] < shifts[i + 1][1]):
-            badBlocks.append(Exception(f'El bloque {shifts[i + 1][0]} comienza antes de que termine el bloque anterior'))
+    for i in range(len(Block)):
+        if not (Block[i].start < Block[i].end):
+            badBlocks.append(Exception(f'El bloque {Block[i].block} ({Block[i].start.isoformat("minutes")} - {Block[i].end.isoformat("minutes")}) termina antes de comenzar'))
+    for i in range(len(Block) - 1):
+        if not (Block[i].end < Block[i + 1].start):
+            badBlocks.append(Exception(f'El bloque {Block[i + 1].block} comienza antes de que termine el bloque anterior'))
     if badBlocks:
         raise Exception(badBlocks)
     
-    minDuration = timedelta(*(0,)*4, *shifts[0][2][::-1]) - timedelta(*(0,)*4, *shifts[0][1][::-1])
-    for shift in shifts[1:]:
-        duration = timedelta(*(0,)*4, *shift[2][::-1]) - timedelta(*(0,)*4, *shift[1][::-1])
+    minDuration = timedelta(hours=Block[0].end.hour, minutes=Block[0].end.minute) - timedelta(hours=Block[0].start.hour, minutes=Block[0].start.minute)
+    for shift in Block[1:]:
+        duration = timedelta(hours=shift.end.hour - shift.start.hour, minutes=shift.end.minute - shift.start.minute)
         if duration < minDuration:
             minDuration = duration
     if afterStartTolerance >= minDuration:
         raise Exception(f'La tolerancia <afterStartTolerance> ({str(afterStartTolerance)}) es mayor a la duración del bloque más corto ({minDuration})')
 
-    minRest = timedelta(hours=shifts[1][1][0], minutes=shifts[1][1][1]) - timedelta(hours=shifts[0][2][0], minutes=shifts[0][2][1])
-    for i in range(len(shifts) - 2):
-        start, end = shifts[i + 1][2], shifts[i + 2][1]
-        if (rest := timedelta(hours=end[0] - start[0], minutes=end[1] - start[1])) < minRest:
+    minRest = timedelta(hours=Block[1].start.hour, minutes=Block[1].start.minute) - timedelta(hours=Block[0].end.hour, minutes=Block[0].end.minute)
+    for i in range(len(Block) - 2):
+        start, end = Block[i + 1].end, Block[i + 2].start
+        if (rest := timedelta(hours=end.hour - start.hour, minutes=end.minute - start.minute)) < minRest:
             minRest = rest
     if beforeStartTolerance > minRest:
         warn(f'El tiempo de tolerancia <beforeStartTolerance> ({str(beforeStartTolerance)}) es mayor al descanso más pequeño ({minRest})')
