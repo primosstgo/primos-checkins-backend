@@ -45,6 +45,7 @@ lib64/
 parts/
 sdist/
 var/
+data/
 *.egg-info/
 .installed.cfg
 *.egg
@@ -91,3 +92,6 @@ db.sqlite3
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
+
+# Custom
+backup.tar

@@ -1,17 +1,33 @@
-from django.db import models
+# type: ignore
+from django.db.models import *
 
-class Primo(models.Model):
-    rol = models.IntegerField(primary_key=True)
-    mail = models.CharField(unique=True, max_length=100)
+class Primo(Model):
+    rol = IntegerField(primary_key=True)
+    mail = CharField(unique=True, max_length=100)
     
-    name = models.CharField(max_length=100)
-    nick = models.CharField(max_length=100)
+    name = CharField(max_length=100)
+    nick = CharField(max_length=100)
 
-    schedule = models.CharField(max_length=100)
+    schedule = CharField(max_length=100)
 
-class Shift(models.Model):
-    id = models.AutoField(primary_key=True)
-    primo = models.ForeignKey(Primo, on_delete=models.CASCADE)
+class StampedShift(Model):
+    id = AutoField(primary_key=True)
+    primo = ForeignKey(Primo, on_delete=CASCADE)
     
-    checkin = models.DateTimeField()
-    checkout = models.DateTimeField(null=True)
+    checkin = DateTimeField()
+    checkout = DateTimeField(null=True)
+
+    class Meta:
+        ordering = ['checkin']
+
+class PardonedShift(Model):
+    id = AutoField(primary_key=True)
+
+    block = IntegerField()
+    date = DateField()
+
+    class Meta:
+        ordering = ['date', 'block']
+        constraints = [
+            UniqueConstraint(fields=['block', 'date'], name='unique_block_date')
+        ]

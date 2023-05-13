@@ -1,7 +1,11 @@
 from datetime import time, timedelta
+from functools import total_ordering
 from warnings import warn
 
-days = 'lmxjv'
+days = {
+    'short': 'lmxjv',
+    'mid': ['lun', 'mar', 'mié', 'jue', 'vie']
+}
 
 class BlockMeta(type):    
     _blocks = []
@@ -15,21 +19,33 @@ class BlockMeta(type):
     def __getitem__(self, key):
         return self._blocks[key]
 
+@total_ordering
 class Block(metaclass=BlockMeta):
-    def __init__(self, block: str, start: time, end: time) -> None:
-        self.block = block
+    def __init__(self, name: str, start: time, end: time) -> None:
+        self.name = name
         self.start = start
         self.end = end
         Block._blocks.append(self)
+    
+    def __repr__(self) -> str:
+        return f"Block('{self.name}', {self.start.isoformat('minutes')}, {self.end.isoformat('minutes')})"
+    
+    def __eq__(self, other):
+        return self is other
+    
+    def __lt__(self, other):
+        return self.start < other.start
 
-Block( "1-2",  time( 8, 15), time( 9, 25))
-Block( "3-4",  time( 9, 35), time(10, 45))
-Block( "5-6",  time(10, 55), time(12,  5))
-Block( "7-8",  time(12, 15), time(13, 25))
-Block( "9-10", time(14, 30), time(15, 40))
-Block("11-12", time(15, 50), time(17,  0))
-Block("13-14", time(17, 10), time(18, 20))
-Block("15-16", time(18, 30), time(19, 40))
+# Aquí se crean los bloques, bastaría con reemplazar el nombre, la hora de
+# entrada y salida o quitar y agregar los bloques según sea necesario
+Block( '1-2' , time( 8, 15), time( 9, 25))
+Block( '3-4' , time( 9, 35), time(10, 45))
+Block( '5-6' , time(10, 55), time(12,  5))
+Block( '7-8' , time(12, 15), time(13, 25))
+Block( '9-10', time(14, 30), time(15, 40))
+Block('11-12', time(15, 50), time(17,  0))
+Block('13-14', time(17, 10), time(18, 20))
+Block('15-16', time(18, 30), time(19, 40))
 
 # TOLERANCIAS
 # beforeStartTolerance: Cuanto tiempo antes de que comienze el turno se puede
@@ -57,7 +73,7 @@ def checks():
             badBlocks.append(Exception(f'El bloque {Block[i].block} ({Block[i].start.isoformat("minutes")} - {Block[i].end.isoformat("minutes")}) termina antes de comenzar'))
     for i in range(len(Block) - 1):
         if not (Block[i].end < Block[i + 1].start):
-            badBlocks.append(Exception(f'El bloque {Block[i + 1].block} comienza antes de que termine el bloque anterior'))
+            badBlocks.append(Exception(f'El bloque {Block[i + 1].name} comienza antes de que termine el bloque anterior'))
     if badBlocks:
         raise Exception(badBlocks)
     
