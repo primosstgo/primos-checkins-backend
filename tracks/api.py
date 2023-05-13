@@ -188,7 +188,7 @@ def get_primo(_, mail: str):
     return _r
 
 @api.get("/shifts")
-def get_shifts(_, mail: str, start: date, end: date = None):
+def get_shifts(_, mail: str, start: date, end: date | None = None):
     print('START GET /shifts', mail, start, end, _u := uuid4(), utils.now().isoformat())
     _t = perf_counter()
 
