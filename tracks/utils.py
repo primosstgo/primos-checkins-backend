@@ -9,12 +9,12 @@ from tracks import parameters
 def now():
     return datetime.now()#.replace(day=9, hour=9, minute=26, second=0, microsecond=0)
 
-def firstWeekday(reference: datetime = None) -> date:
+def firstWeekday(reference: datetime | None = None) -> date:
     if reference is None:
         reference = now()
-    return reference.date() - timedelta(days = reference.weekday())
+    return reference.date() - timedelta(days=reference.weekday())
 
-def firstMonthDay(month: int, year: int = None):
+def firstMonthDay(month: int, year: int | None = None):
     if year is None:
         year = now().year
     return date(year, month, 1)
@@ -45,7 +45,7 @@ class Shift(NamedTuple):
 # referencia <reference>) o el más cercano, hasta el más lejano.
 # NOTA1: Debería retornar un objeto Block y un date
 # NOTA2: Acabo de leer la NOTA1 y no tengo idea a qué me refería cuando la escribí
-def parseSchedule(schedule: str, reference: datetime = None) -> List[Shift]:
+def parseSchedule(schedule: str, reference: datetime | None = None) -> List[Shift]:
     if reference is None:
         reference = now()
     shifts = []

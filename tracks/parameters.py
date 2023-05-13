@@ -3,6 +3,7 @@ from functools import total_ordering
 from warnings import warn
 
 days = {
+    # Correspondiente al regex
     'short': 'lmxjv',
     'mid': ['lun', 'mar', 'mié', 'jue', 'vie']
 }
@@ -47,11 +48,13 @@ Block('11-12', time(15, 50), time(17,  0))
 Block('13-14', time(17, 10), time(18, 20))
 Block('15-16', time(18, 30), time(19, 40))
 
+scheduleRegEx = f"([{days['short']}](?:[0-{(lastShift := len(Block) - 1)}],)*[0-{lastShift}])"
+
 # TOLERANCIAS
 # beforeStartTolerance: Cuanto tiempo antes de que comienze el turno se puede
 #  iniciar el mismo. Establecer el valor de este parámetro por sobre el tiempo
 #  de descanso entre bloques podría ocasionar bugs (no comprobado), puesto que
-#   abre la posibilidad a comenzar un turno antes de que acabe el anterior.
+#  abre la posibilidad a comenzar un turno antes de que acabe el anterior.
 beforeStartTolerance = timedelta(minutes=10)
 # afterStartTolerance: Cuanto tiempo después de que comenzó el turno se puede
 #  iniciar el mismo. Una buena idea es agregar 59 segundos extras, de esta forma
@@ -61,11 +64,13 @@ beforeStartTolerance = timedelta(minutes=10)
 #  apenas comience el minuto 11. De no agregar estos 59 segundos el turno se
 #  cerraría apenas comiencie el minuto 10 ([0, 10[).
 afterStartTolerance = beforeStartTolerance + timedelta(seconds=59)
-# afterEndTolerance: Cuanto tiempo se concede al primo para cerrar su turno,
-#  una vez terminada la hora, sin que se considere sospechoso.
+# afterEndTolerance: Cuanto tiempo se concede al primo para cerrar su turno una
+#  vez terminado el bloque.
 afterEndTolerance = beforeStartTolerance
 
-# Esta función se asegura de que los parámetros tengan sentido
+# Esta función se asegura de que los parámetros tengan sentido, recomiendo
+# ignorarla. Si en el futuro da problemas se puede borrar sin afectar al resto
+# del código.
 def checks():
     badBlocks = []
     for i in range(len(Block)):

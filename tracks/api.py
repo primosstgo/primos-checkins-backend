@@ -1,4 +1,4 @@
-from django.shortcuts import get_object_or_404, get_list_or_404
+from django.shortcuts import get_object_or_404
 from django.db.utils import IntegrityError
 from django.forms.models import model_to_dict
 
@@ -254,8 +254,6 @@ def push_a_shift(_, payload: PushShift):
 
 @api.get("/shifts/week", response=List[List[RegisteredShift]])
 def get_week_shifts(_):
-    now = utils.now()
-    
     week = [[], [], [], [], []]
     for shift in StampedShift.objects.filter(checkin__gte=utils.firstWeekday()):
         week[shift.checkin.weekday()].append({
