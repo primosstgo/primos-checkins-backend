@@ -63,6 +63,37 @@ def parseSchedule(schedule: str, reference: datetime | None = None) -> List[Shif
     shifts.sort(key=lambda s: datetime.combine(s.date, s.block.start))
     return shifts
 
+def _scheduleGenerator(schedule, reference: datetime):
+    i = 0
+    monday = firstWeekday(reference)
+    for weekday, block in schedule:
+        checkout = datetime.combine(monday, block.end) + timedelta(days=weekday)
+        if checkout >= reference:
+            break
+        i += 1
+    else:
+        i = 0
+        monday += timedelta(days=7)
+    
+    while True:
+        weekday, block = schedule[i]
+        yield Shift(monday + timedelta(days=weekday), block)
+        if not (i := (i + 1)%len(schedule)):
+            monday += timedelta(days=7)
+
+def _parseSchedule(schedule: str, reference: datetime = None):
+    if reference is None:
+        reference = now()
+    
+    effectiveSchedule = []
+    for daily in findall(getRegex(), schedule):
+        for i in daily[1:].split(','):
+            block = parameters.Block[int(i)]
+            weekday = parameters.days['short'].index(daily[0])
+            effectiveSchedule.append((weekday, block))
+    
+    return (len(effectiveSchedule), _scheduleGenerator(effectiveSchedule, reference))
+
 # Esta función, dado <date: datetime> (Fecha y hora), retornará el bloque al que
 # pertenece la hora proporcionada (Si esta está dentro de los límites del bloque)
 # o el bloque más cercano. Es importante recalcar que encontrará el bloque más
