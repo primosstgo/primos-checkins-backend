@@ -1,13 +1,11 @@
+# Django
 from django.shortcuts import get_object_or_404
 from django.db.utils import IntegrityError
 from django.forms.models import model_to_dict
-
-from time import perf_counter
-from uuid import uuid4
-
+from ninja import NinjaAPI, Schema
+# Classes & Typing
 from datetime import datetime, time, timedelta, date
 from typing import List, Optional
-from ninja import NinjaAPI, Schema
 
 from tracks.models import *
 from tracks import utils
@@ -94,27 +92,18 @@ class PushShift(Schema):
 class UpdateShift(Schema):
     id: int
 
-@api.get('/test')
-def test(_, mail: str, start: datetime):
-    primo = get_object_or_404(Primo, mail=mail.lower())
-    length, schedule = utils._parseSchedule(primo.schedule, start)
-    for day in range(length*3):
-        print(next(schedule))
-
 @api.get("/now", response=Now)
+@utils.logged
 def get_now_time(_):
-    print('START GET /now', _u := uuid4(), utils.now().isoformat())
-    _t = perf_counter()
-
     now = utils.now()
     upcoming = utils.aproximateToShift(now, False)
     pair = []
     for primo in Primo.objects.all():
-        schedule = utils.parseSchedule(primo.schedule)
+        schedule = utils.DEPRECATED_parseSchedule(primo.schedule)
         if upcoming in schedule:
             pair.append(primo)
 
-    _r = {
+    return 200, {
         "weekday": now.weekday(),
         "time": now.time().isoformat('minutes'),
         "datetime": now,
@@ -127,29 +116,18 @@ def get_now_time(_):
         },
         "pair": pair
     }
-    
-    print('END GET /now', _u, round(perf_counter() - _t))
-    return _r
 
 @api.get("/primos", response=List[NaturalPrimo])
+@utils.logged
 def get_primos(_):
-    print('START GET /primos', _u := uuid4(), utils.now().isoformat())
-    _t = perf_counter()    
-
-    _r = [{
+    return 200, [{
         "mail": primo.mail,
         "nick": primo.nick
     } for primo in Primo.objects.all()]
-    
-    print('END GET /primos', _u, round(perf_counter() - _t))
-    return _r
 
 @api.get("/primos/{str:mail}", response=CurrentPrimo)
+@utils.logged
 def get_primo(_, mail: str):
-    print(_.get_full_path())
-    print('START GET /primos', mail, _u := uuid4(), utils.now().isoformat())
-    _t = perf_counter()
-
     primo = get_object_or_404(Primo, mail=mail.lower())
     try:
         rshift = StampedShift.objects.get(checkin__gte=utils.now().date(), primo=primo, checkout__isnull=True)
@@ -168,11 +146,11 @@ def get_primo(_, mail: str):
             "checkout": rshift.checkout
         }
     except StampedShift.DoesNotExist:
-        _, schedule = utils._parseSchedule(primo.schedule)
-        nshift = next(schedule)# utils.parseSchedule(primo.schedule)[0]
+        _, schedule = utils.parseSchedule(primo.schedule)
+        nshift = next(schedule)# utils.DEPRECATED_parseSchedule(primo.schedule)[0]
         running = None
 
-    _r = {
+    return 200, {
         "mail": primo.mail,
         "nick": primo.nick,
         
@@ -184,14 +162,9 @@ def get_primo(_, mail: str):
         }
     }
 
-    print('END GET /primos', mail, _u, round(perf_counter() - _t))
-    return _r
-
 @api.get("/shifts")
+@utils.logged
 def get_shifts(_, mail: str, start: date, end: date | None = None):
-    print('START GET /shifts', mail, start, end, _u := uuid4(), utils.now().isoformat())
-    _t = perf_counter()
-
     if end is None:
         end = utils.now().date()
     primo = get_object_or_404(Primo, mail=mail.lower())
@@ -214,7 +187,7 @@ def get_shifts(_, mail: str, start: date, end: date | None = None):
             suspicious.append(fshift)
     
     pardonedShifts = [utils.Shift(shift.date, parameters.Block[shift.block]) for shift in PardonedShift.objects.all()]
-    _, schedule = utils._parseSchedule(primo.schedule, datetime.combine(start, time())) 
+    _, schedule = utils.parseSchedule(primo.schedule, datetime.combine(start, time())) 
     datapoints, labels = [], []
     j, k = 0, 0
     while (shift := next(schedule)).date <= end:
@@ -235,7 +208,7 @@ def get_shifts(_, mail: str, start: date, end: date | None = None):
             else:
                 datapoints.append(None)
 
-    _r = {
+    return 200, {
         "start": start,
         "end": end,
 
@@ -248,17 +221,12 @@ def get_shifts(_, mail: str, start: date, end: date | None = None):
         "labels": labels,
     }
 
-    print('END GET /shifts', mail, start, end, _u, round(perf_counter() - _t))
-    return _r
-
 @api.post("/shifts", response={200: RegisteredShift, 403: Detail})
+@utils.logged
 def push_a_shift(_, payload: PushShift):
-    print('START POST /shifts', payload, _u := uuid4(), utils.now().isoformat())
-    _t = perf_counter()
-
     now = utils.now()
     primo = get_object_or_404(Primo, mail=payload.mail)
-    shifts = utils.parseSchedule(primo.schedule)
+    shifts = utils.DEPRECATED_parseSchedule(primo.schedule)
     
     # Aquí se verifica si el turno que estás intentando pushear corresponde a alguno de los turnos de tu horario
     for shift in shifts:
@@ -268,7 +236,7 @@ def push_a_shift(_, payload: PushShift):
         return 403, {"detail": "You're not on your shift"}
     
     shift = StampedShift.objects.create(**{"primo": primo, "checkin": now})
-    _r = 200, {
+    return 200, {
         "id": shift.id,
 
         "primo":  {
@@ -281,14 +249,9 @@ def push_a_shift(_, payload: PushShift):
         "checkin": shift.checkin,
     }
 
-    print('END POST /shifts', payload, _u, round(perf_counter() - _t))
-    return _r
-
 @api.get("/shifts/week", response=List[List[RegisteredShift]])
+@utils.logged
 def get_week_shifts(_):
-    print('START GET /shifts/week', _u := uuid4(), utils.now().isoformat())
-    _t = perf_counter()
-
     week = [[], [], [], [], []]
     for shift in StampedShift.objects.filter(checkin__gte=utils.firstWeekday()):
         week[shift.checkin.weekday()].append({
@@ -323,14 +286,11 @@ def get_week_shifts(_):
                 nextshift += 1
             thisshift += 1
     
-    print('END GET /shifts/week', _u, round(perf_counter() - _t))
-    return week
+    return 200, week
 
 @api.put("/shifts", response={200: RegisteredShift, 403: Detail})
+@utils.logged
 def update_a_shift(_, payload: UpdateShift):
-    print('START PUT /shifts', payload, _u := uuid4(), utils.now().isoformat())
-    _t = perf_counter()
-
     now = utils.now()
     shift = get_object_or_404(StampedShift, id=payload.id)
 
@@ -342,7 +302,7 @@ def update_a_shift(_, payload: UpdateShift):
     shift.checkout = now
     shift.save()
     
-    _r = 200, {
+    return 200, {
         "id": shift.id,
         
         "primo": {
@@ -356,12 +316,9 @@ def update_a_shift(_, payload: UpdateShift):
         "checkout": shift.checkout
     }
 
-    print('END PUT /shifts', payload, _u, round(perf_counter() - _t))
-    return _r
-
 @api.post("/shifts/pardon", response={200: NaturalShift, 403: Detail})
+@utils.logged
 def pardon_a_shift(_, payload: _PrimitiveShift):
-    print('START POST /shifts/pardon', payload, _u := uuid4(), utils.now().isoformat())
     if 0 <= payload.block < len(parameters.Block):
         try:
             PardonedShift.objects.create(**payload.dict())
@@ -369,13 +326,9 @@ def pardon_a_shift(_, payload: _PrimitiveShift):
             return 403, {"detail": "Shift already pardoned"}
 
         block = parameters.Block[payload.block]
-        _r = 200, {
+        return 200, {
             "block": block.name, 
             "checkin": datetime.combine(payload.date, block.start),
             "checkout": datetime.combine(payload.date, block.end)
         }
-        
-        print('END POST /shifts/pardon', payload, _u, round(perf_counter() - _t))
-        return _r
     return 403, {"detail": f"Block ({payload.block}) out of the range (0..{len(parameters.Block) - 1})"}
-
