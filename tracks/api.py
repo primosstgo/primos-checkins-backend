@@ -173,11 +173,15 @@ def get_shifts(_, mail: str, start: date, end: date | None = None):
     for stampedShift in StampedShift.objects.filter(checkin__gte=start, checkin__lte=end, primo=primo):
         shift = utils.aproximateToShift(stampedShift.checkin)
         fshift = model_to_dict(stampedShift)
-        fshift["primo"] = {
-            "mail": stampedShift.primo.mail,
-            "nick": stampedShift.primo.nick,
-        }
-        fshift["block"] = shift.block.name
+        fshift.update({
+            "primo": {
+                "mail": stampedShift.primo.mail,
+                "nick": stampedShift.primo.nick,
+            },
+            "block": shift.block.name,
+            "start": datetime.combine(shift.day, shift.block.start),
+            "end": datetime.combine(shift.day, shift.block.end),
+        })
 
         rightCheckin = (shift.checkin - parameters.beforeStartTolerance) < fshift["checkin"] < (shift.checkin  + parameters.afterStartTolerance)
         rigthCheckout = (fshift["checkout"] is not None) and (shift.checkout < fshift["checkout"] < (shift.checkout + parameters.afterEndTolerance))
@@ -188,33 +192,51 @@ def get_shifts(_, mail: str, start: date, end: date | None = None):
     
     pardonedShifts = [utils.Shift(shift.date, parameters.Block[shift.block]) for shift in PardonedShift.objects.all()]
     _, schedule = utils.parseSchedule(primo.schedule, datetime.combine(start, time())) 
-    datapoints, labels = [], []
+    datapoints, labels, shifts = [], [], []
     j, k = 0, 0
-    while (shift := next(schedule)).date <= end:
+    while (shift := next(schedule)).day <= end:
         while k < len(pardonedShifts) and pardonedShifts[k] < shift:
             k += 1
 
         if k >= len(pardonedShifts) or shift != pardonedShifts[k]:
-            labels.append(f"{parameters.days['mid'][shift.date.weekday()]} {shift.block.name}")
+            labels.append(f"{parameters.days['mid'][shift.day.weekday()]} {shift.block.name}")
             if (
                     j < len(inSchedule)
-                and shift.date == inSchedule[j]["checkin"].date()
+                and shift.day == inSchedule[j]["checkin"].date()
                 and shift.block.name == inSchedule[j]["block"]
             ):
                 checkinTime = inSchedule[j]["checkin"].time()
                 shiftStartTime = shift.block.start
                 datapoints.append(60*(shiftStartTime.hour - checkinTime.hour) + shiftStartTime.minute - checkinTime.minute)
+
+                shifts.append(inSchedule[j])
+
                 j += 1
             else:
                 datapoints.append(None)
+                shifts.append({
+                    "id": None,
+                    "primo": None,
+
+                    "checkin": None,
+                    "checkout": None,
+                    
+                    "block": shift.block.name,
+                    "start": datetime.combine(shift.day, shift.block.start),
+                    "end": datetime.combine(shift.day, shift.block.end),
+                })
 
     return 200, {
+        "primo": {
+            "mail": primo.mail,
+            "nick": primo.nick,
+        },
         "start": start,
         "end": end,
 
-        "ideal": len(datapoints),
+        "shifts": shifts,
 
-        "inSchedule": inSchedule,
+        #"stamped": inSchedule,
         "suspicious": suspicious,
 
         "datapoints": datapoints,
