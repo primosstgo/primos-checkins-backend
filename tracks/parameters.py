@@ -26,6 +26,7 @@ class Block(metaclass=BlockMeta):
         self.name = name
         self.start = start
         self.end = end
+
         Block._blocks.append(self)
     
     def __repr__(self) -> str:
