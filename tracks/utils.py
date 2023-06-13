@@ -21,7 +21,7 @@ def logged(api_call: Callable):
 # Esta función es importante para el debug, ya que nos
 # permite cambiar fácilmente la hora en toda la app.
 def now():
-    return datetime.now()#.replace(day=9, hour=9, minute=26, second=0, microsecond=0)
+    return datetime.now()#.replace(month=5, day=30, hour=13, minute=3)
 
 def firstWeekday(reference: datetime | None = None) -> date:
     if reference is None:
@@ -37,20 +37,31 @@ def getRegex():
 def verifyRegex(schedule: str) -> bool:
     return fullmatch(f'{getRegex()}+', schedule) is not None
 
-class Shift(NamedTuple):
-    date: date
-    block: parameters.Block
+class Shift():
+    def __init__(self, day: date, block: parameters.Block):
+        self.day = day
+        self.block = block
 
     def __repr__(self) -> str:
-        return f'{self.date.isoformat()} {self.block.name}'
-
+        return f'{self.day.isoformat()} {self.block.name}'
+    
+    def __eq__(self, other):
+        return self.day == other.day and self.block == other.block
+    
+    def __gt__(self, other):
+        if self.day > other.day:
+            return True
+        elif self.day == other.day:
+            return self.block > other.block
+        return False
+    
     @property
     def checkin(self) -> datetime:
-        return datetime.combine(self.date, self.block.start)
+        return datetime.combine(self.day, self.block.start)
 
     @property
     def checkout(self) -> datetime:
-        return datetime.combine(self.date, self.block.end)
+        return datetime.combine(self.day, self.block.end)
 
 # DEPRECATED!: Usar parseSchedule en su lugar. No lo borro porque no sé si
 #              ciertas partes del código funcionarían sin esta función, pero la
@@ -75,7 +86,7 @@ def DEPRECATED_parseSchedule(schedule: str, reference: datetime | None = None) -
                 checkout += timedelta(days=7)
             shifts.append(Shift(checkout.date(), block))
     
-    shifts.sort(key=lambda s: datetime.combine(s.date, s.block.start))
+    shifts.sort(key=lambda s: datetime.combine(s.day, s.block.start))
     return shifts
 
 # Esta función te retorna un generator que genera tu próximo turno a partir de una
