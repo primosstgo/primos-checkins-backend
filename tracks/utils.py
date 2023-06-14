@@ -1,24 +1,35 @@
 from datetime import date, datetime, timedelta
 from re import findall, fullmatch
-from typing import List, NamedTuple
+from typing import List, NamedTuple, Callable
+
+from time import perf_counter
+from uuid import uuid4
+from functools import wraps
 
 from tracks import parameters
+
+# Decorator que imprime un log cuando se haga una llamada a la api
+def logged(api_call: Callable):
+    @wraps(api_call)
+    def wrap(request, *args, **kwargs):
+        print(f'{(key := uuid4())} IN  {request.method} {request.get_full_path()}')
+        time_counter, response_code, response_body = perf_counter(), *api_call(request, *args, **kwargs)
+        print(f'{key} OUT {response_code} {(perf_counter() - time_counter)*1000:03.0f}ms')
+        return response_code, response_body
+    return wrap
 
 # Esta función es importante para el debug, ya que nos
 # permite cambiar fácilmente la hora en toda la app.
 def now():
-    return datetime.now()#.replace(day=9, hour=9, minute=26, second=0, microsecond=0)
+    return datetime.now()#.replace(month=5, day=30, hour=13, minute=3)
 
-def firstWeekday(reference: datetime = None) -> date:
+def firstWeekday(reference: datetime | None = None) -> date:
     if reference is None:
         reference = now()
-    return reference.date() - timedelta(days = reference.weekday())
+    return reference.date() - timedelta(days=reference.weekday())
 
-def firstMonthDay(month: int, year: int = None):
-    if year is None:
-        year = now().year
-    return date(year, month, 1)
-
+# Esta función te retorna el regex que procesa el horario de un primo
+# NOTA: Quiero mover esto a parameters.py
 def getRegex():
     lastShift = len(parameters.Block) - 1
     return f"([{parameters.days['short']}](?:[0-{lastShift}],)*[0-{lastShift}])"
@@ -26,26 +37,41 @@ def getRegex():
 def verifyRegex(schedule: str) -> bool:
     return fullmatch(f'{getRegex()}+', schedule) is not None
 
-class Shift(NamedTuple):
-    date: date
-    block: parameters.Block
+class Shift():
+    def __init__(self, day: date, block: parameters.Block):
+        self.day = day
+        self.block = block
 
     def __repr__(self) -> str:
-        return f'{self.date.isoformat()} {self.block.name}'
-
+        return f'{self.day.isoformat()} {self.block.name}'
+    
+    def __eq__(self, other):
+        return self.day == other.day and self.block == other.block
+    
+    def __gt__(self, other):
+        if self.day > other.day:
+            return True
+        elif self.day == other.day:
+            return self.block > other.block
+        return False
+    
     @property
     def checkin(self) -> datetime:
-        return datetime.combine(self.date, self.block.start)
+        return datetime.combine(self.day, self.block.start)
 
     @property
     def checkout(self) -> datetime:
-        return datetime.combine(self.date, self.block.end)
+        return datetime.combine(self.day, self.block.end)
 
+# DEPRECATED!: Usar parseSchedule en su lugar. No lo borro porque no sé si
+#              ciertas partes del código funcionarían sin esta función, pero la
+#              idea sería borrar esta función.
 # Retorna el horario del primo, ordenado desde el turno actual (desde el punto de
 # referencia <reference>) o el más cercano, hasta el más lejano.
-# NOTA1: Debería retornar un objeto Block y un date
+# NOTA1: Debería retornar un objeto Block y un Date
 # NOTA2: Acabo de leer la NOTA1 y no tengo idea a qué me refería cuando la escribí
-def parseSchedule(schedule: str, reference: datetime = None) -> List[Shift]:
+# NOTA3: DEPRECATED
+def DEPRECATED_parseSchedule(schedule: str, reference: datetime | None = None) -> List[Shift]:
     if reference is None:
         reference = now()
     shifts = []
@@ -60,9 +86,14 @@ def parseSchedule(schedule: str, reference: datetime = None) -> List[Shift]:
                 checkout += timedelta(days=7)
             shifts.append(Shift(checkout.date(), block))
     
-    shifts.sort(key=lambda s: datetime.combine(s.date, s.block.start))
+    shifts.sort(key=lambda s: datetime.combine(s.day, s.block.start))
     return shifts
 
+# Esta función te retorna un generator que genera tu próximo turno a partir de una
+# referencia <reference>.
+# https://docs.python.org/3/reference/expressions.html#yield-expressions
+# NOTA: Programé esta función pensando en nunca usarla directamente (por eso parte
+# por _), la uso sólo en parseSchedule.
 def _scheduleGenerator(schedule, reference: datetime):
     i = 0
     monday = firstWeekday(reference)
@@ -81,7 +112,10 @@ def _scheduleGenerator(schedule, reference: datetime):
         if not (i := (i + 1)%len(schedule)):
             monday += timedelta(days=7)
 
-def _parseSchedule(schedule: str, reference: datetime = None):
+# Esta función, a partir de un horario <schedule> en el formato del regex, retorna
+# el largo del horario de un Primo (cantidad de turnos por semana) y un generator de
+# los próximos turnos a partir de una referencia <reference>. 
+def parseSchedule(schedule: str, reference: datetime | None = None):
     if reference is None:
         reference = now()
     
@@ -94,7 +128,7 @@ def _parseSchedule(schedule: str, reference: datetime = None):
     
     return (len(effectiveSchedule), _scheduleGenerator(effectiveSchedule, reference))
 
-# Esta función, dado <date: datetime> (Fecha y hora), retornará el bloque al que
+# Esta función, dado <instant> (Fecha y hora), retornará el bloque al que
 # pertenece la hora proporcionada (Si esta está dentro de los límites del bloque)
 # o el bloque más cercano. Es importante recalcar que encontrará el bloque más
 # cercano dentro del día de la semana indicado. Por ejemplo; si nos encontramos
