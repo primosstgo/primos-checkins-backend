@@ -291,6 +291,8 @@ def get_week_shifts(_):
         })
 
     # Esta parte del código se encarga de fusionar turnos consecutivos
+    # NOTA: Esto puede ocasionar que "desaparezca" el turno más reciente si renovaste
+    # turno (en la respuesta), pero según el uso actual de esta llamada no debería pasar nada.
     onemin = timedelta(minutes=1)
     for day in week:
         thisshift = 0
