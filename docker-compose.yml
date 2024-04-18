@@ -30,7 +30,7 @@ services:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=0
     ports:
-      - "5433:5432"
+      - "5434:5432"
 volumes:
   data:
 
