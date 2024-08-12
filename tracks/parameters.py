@@ -41,13 +41,13 @@ class Block(metaclass=BlockMeta):
 # Aquí se crean los bloques, bastaría con reemplazar el nombre, la hora de
 # entrada y salida o quitar y agregar los bloques según sea necesario
 Block( '1-2' , time( 8, 15), time( 9, 25))
-Block( '3-4' , time( 9, 35), time(10, 45))
-Block( '5-6' , time(10, 55), time(12,  5))
-Block( '7-8' , time(12, 15), time(13, 25))
-Block( '9-10', time(14, 30), time(15, 40))
-Block('11-12', time(15, 50), time(17,  0))
-Block('13-14', time(17, 10), time(18, 20))
-Block('15-16', time(18, 30), time(19, 40))
+Block( '3-4' , time( 9, 40), time(10, 50))
+Block( '5-6' , time(11, 5), time(12,  15))
+Block( '7-8' , time(12, 30), time(13, 40))
+Block( '9-10', time(14, 40), time(15, 50))
+Block('11-12', time(16, 5), time(17,  15))
+Block('13-14', time(17, 30), time(18, 40))
+Block('15-16', time(18, 55), time(20, 5))
 
 scheduleRegEx = f"([{days['short']}](?:[0-{(lastShift := len(Block) - 1)}],)*[0-{lastShift}])"
 

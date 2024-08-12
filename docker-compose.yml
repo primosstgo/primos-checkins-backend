@@ -15,7 +15,7 @@ services:
       - POSTGRES_PASSWORD=0
     deploy:
       restart_policy:
-        condition: on-failure
+        condition: unless-stopped
         delay: 30s
         window: 120s
     depends_on:
@@ -31,6 +31,7 @@ services:
       - POSTGRES_PASSWORD=0
     ports:
       - "5434:5432"
+    restart: unless-stopped
 volumes:
   data:
 
